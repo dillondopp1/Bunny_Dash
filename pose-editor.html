@@ -26,6 +26,27 @@
   .hint { color:#777; font-size:12px; }
   #scrub { width:100%; }
   .edited { color:#c8501e; font-weight:600; }
+  #guide { background:#fff; border:1px solid #ddd; border-radius:6px; padding:12px 14px; margin-bottom:10px; }
+  #guide.off { display:none; }
+  #guideBar { display:flex; gap:4px; margin-bottom:10px; }
+  #guideBar div { flex:1; height:6px; background:#e2e2e2; border-radius:3px; }
+  #guideBar div.done { background:#3a9d5d; }
+  #guideBar div.cur { background:#1e6ec8; }
+  #guideStep { font-size:12px; color:#777; text-transform:uppercase; letter-spacing:.04em; }
+  #guideTitle { font-size:20px; margin:2px 0 6px; }
+  #guideWhat { margin:0 0 8px; }
+  #guideCheck { margin:0 0 10px; padding-left:18px; }
+  #guideCheck li { margin:2px 0; }
+  #guideFix { background:#f4f8fd; border-left:3px solid #1e6ec8; padding:7px 10px; margin:0 0 10px; font-size:13px; }
+  #guideNav { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  #guideNav .spacer { flex:1; }
+  button.primary { background:#1e6ec8; color:#fff; border-color:#1e6ec8; }
+  button.good { background:#3a9d5d; color:#fff; border-color:#3a9d5d; }
+  #guideDone { color:#3a9d5d; font-weight:600; }
+  #keys button.done { border-color:#3a9d5d; color:#2c7a48; }
+  .startCard { background:#fff; border:1px solid #ddd; border-radius:6px; padding:14px; margin-bottom:10px; }
+  .startCard ol { margin:6px 0 0; padding-left:20px; }
+  .startCard li { margin:3px 0; }
 </style>
 </head>
 <body>
@@ -40,6 +61,29 @@
 </header>
 <main>
   <div>
+    <div class="startCard" id="startCard">
+      <b>Start here.</b> Load the vault JSON, then the video (or the frame images) with the buttons above.
+      <ol>
+        <li>Press <b>Start guided fixing</b> to be walked through the nine positions one at a time.</li>
+        <li>Or press a numbered key button to jump straight to a position and drag joints freely.</li>
+      </ol>
+    </div>
+    <div id="guide" class="off">
+      <div id="guideBar"></div>
+      <div id="guideStep"></div>
+      <h2 id="guideTitle"></h2>
+      <p id="guideWhat"></p>
+      <ul id="guideCheck"></ul>
+      <p id="guideFix"></p>
+      <div id="guideNav">
+        <button id="guideBack">&#9664; Back</button>
+        <button id="guideLooksRight" class="good">Looks right</button>
+        <button id="guideNext" class="primary">Next step &#9654;</button>
+        <span class="spacer"></span>
+        <span id="guideDone"></span>
+        <button id="guideExit">Exit guide</button>
+      </div>
+    </div>
     <canvas id="c" width="1280" height="720"></canvas>
     <div class="row">
       <button id="prev">&#9664;</button>
@@ -55,6 +99,10 @@
       <button id="reset">Reset frame</button>
       <button id="copyPrev">Copy previous frame</button>
       <span class="hint">Drag a joint. Arrows step frames, 1 to 9 jump to key positions.</span>
+    </div>
+    <div class="row">
+      <button id="guideStart" class="primary">Start guided fixing</button>
+      <span class="hint">Nine steps, one per position. You can leave at any time.</span>
     </div>
     <div class="row" id="keys"></div>
     <div class="row">
@@ -248,7 +296,13 @@ function seekVideo() {
   if (Math.abs(S.video.currentTime - t) < 0.002) { draw(); return; }
   S.video.currentTime = t;
 }
-function goto(i) { S.i = Math.min(Math.max(i, 0), S.data.frames.length - 1); seekVideo(); draw(); }
+function goto(i) { S.i = Math.min(Math.max(i, 0), S.data.frames.length - 1); seekVideo(); draw(); if (G.on) syncGuideHighlight(); }
+function syncGuideHighlight() {
+  // If the user scrubbed to a different key position, follow them.
+  const fr = S.data.frames[S.i];
+  const n = S.data.keys.findIndex(k => k.frame === fr.frame);
+  if (n >= 0 && n !== G.i) { G.i = n; renderGuide(); }
+}
 
 // dragging
 function pickJoint(wx, wy) {
@@ -273,10 +327,11 @@ function loadData(obj) {
   buildKeys();
   const sel = document.getElementById('assignKey'); sel.innerHTML = '<option value="">(choose)</option>' + KEY_NAMES.map(n => `<option>${n}</option>`).join('');
   goto(S.data.keys[0] ? S.data.frames.findIndex(f => f.frame === S.data.keys[0].frame) : 0);
+  G.on = false; G.i = 0; G.done = {}; renderGuide();
 }
 function buildKeys() {
   const host = document.getElementById('keys'); host.innerHTML = '';
-  S.data.keys.forEach((k, n) => { const b = document.createElement('button'); b.textContent = `${n + 1} ${k.name} (${k.frame})`; b.dataset.frame = k.frame;
+  S.data.keys.forEach((k, n) => { const b = document.createElement('button'); b.textContent = `${n + 1} ${k.name} (${k.frame})`; b.dataset.frame = k.frame; b.dataset.name = k.name;
     b.onclick = () => goto(S.data.frames.findIndex(f => f.frame === k.frame)); host.append(b); });
 }
 document.getElementById('jsonFile').addEventListener('change', ev => { const f = ev.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => loadData(JSON.parse(r.result)); r.readAsText(f); });
@@ -302,7 +357,7 @@ document.getElementById('zoom').onchange = draw;
 for (const id of ['showVideo', 'showFk', 'showPole']) document.getElementById(id).onchange = draw;
 document.getElementById('reset').onclick = () => { S.data.frames[S.i] = JSON.parse(JSON.stringify(S.orig.frames[S.i])); draw(); };
 document.getElementById('copyPrev').onclick = () => { if (S.i > 0) { const p = S.data.frames[S.i - 1]; const f = S.data.frames[S.i]; f.joints = JSON.parse(JSON.stringify(p.joints)); recompute(S.i); draw(); } };
-document.getElementById('assignKey').onchange = ev => { const n = ev.target.value; if (!n) return; const k = S.data.keys.find(k => k.name === n); if (k) k.frame = S.data.frames[S.i].frame; buildKeys(); draw(); ev.target.value = ''; };
+document.getElementById('assignKey').onchange = ev => { const n = ev.target.value; if (!n) return; const k = S.data.keys.find(k => k.name === n); if (k) k.frame = S.data.frames[S.i].frame; buildKeys(); draw(); renderGuide(); ev.target.value = ''; };
 document.getElementById('bendToward').onchange = ev => { S.data.poleStyle.bendToward = ev.target.value; draw(); };
 document.getElementById('bendScale').onchange = ev => { S.data.poleStyle.bendScale = parseFloat(ev.target.value) || 1; draw(); };
 document.getElementById('grip').onchange = ev => { S.data.pole.gripLength = parseFloat(ev.target.value); S.data.frames.forEach((f, k) => { if (f.pole && f.pole.state === 'planted') recompute(k); }); draw(); };
@@ -318,7 +373,130 @@ window.addEventListener('keydown', ev => {
   if (!S.data || ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
   if (ev.key === 'ArrowRight') goto(S.i + 1); if (ev.key === 'ArrowLeft') goto(S.i - 1);
   if (ev.key >= '1' && ev.key <= '9') { const k = S.data.keys[parseInt(ev.key) - 1]; if (k) goto(S.data.frames.findIndex(f => f.frame === k.frame)); }
+  if (ev.key === 'g' || ev.key === 'G') { G.on ? document.getElementById('guideExit').click() : document.getElementById('guideStart').click(); }
+  if (G.on && ev.key === 'Enter') { document.getElementById('guideNext').click(); }
 });
+
+// ---------------------------------------------------------------------------
+// Guided fixing: one step per key position. Each step says what the position
+// is, what to check on the video frame, and what to drag if it is wrong.
+// ---------------------------------------------------------------------------
+const STEPS = {
+  'Run': {
+    what: 'The last stride before the plant. The pole is still being carried, so its tip is drawn from the top hand, not measured.',
+    check: ['Both feet sit where they do in the video, one clearly ahead',
+            'The torso is close to upright, leaning slightly forward',
+            'Both hands are on the pole, the top hand higher and behind'],
+    fix: 'If a foot or hand is on the wrong body part, drag it onto the right one. The pole tip direction here is an estimate, so only the hands matter.'
+  },
+  'Plant': {
+    what: 'The pole tip goes into the box and the hands drive overhead. This frame sets the grip length used for the whole vault.',
+    check: ['The top hand is at full reach above the head',
+            'The takeoff foot is on the ground, under or just behind the hip',
+            'The pole runs from the top hand down to the box'],
+    fix: 'Get the top wrist right before anything else on this frame: grip length is measured from it to the box, and every bend value later depends on it.'
+  },
+  'Takeoff': {
+    what: 'Last ground contact. The takeoff foot leaves and the body starts to swing.',
+    check: ['The takeoff foot is still touching the ground',
+            'The trail leg is behind the body, not yet swinging',
+            'Both arms are extended overhead'],
+    fix: 'If the foot looks off the ground already, step back a frame and use "Set this frame as" to move Takeoff there. That keeps the pole bend from starting early.'
+  },
+  'Swing': {
+    what: 'The trail leg swings through and the body starts to rotate back under the hands.',
+    check: ['The trail leg is swinging forward and up, knee leading',
+            'The torso is starting to lean back',
+            'Both hands are still on the pole and the pole is bending'],
+    fix: 'Legs are the usual problem here. If left and right are swapped, drag each knee and ankle onto the correct leg; the colours are green for left and magenta for right.'
+  },
+  'Rockback': {
+    what: 'Hips come up toward the hands, body folding into an L or a tuck. The detector often loses limbs here.',
+    check: ['The hips are above or level with the shoulders',
+            'Knees are drawn to the chest, not splayed',
+            'The head is below the hips (the athlete is going upside down)'],
+    fix: 'This is the most jittered phase. If the frame is badly wrong, press "Copy previous frame" and then drag the joints into place rather than starting from nothing.'
+  },
+  'Extension': {
+    what: 'The body extends up along the pole, hips highest, legs going vertical.',
+    check: ['The body is close to a straight line from hands to feet',
+            'The feet are the highest point in the frame',
+            'The pole is still bent but starting to recoil'],
+    fix: 'Check the ankles and feet. If they are short of the true position, the extension will look tucked in the animation even though the athlete was straight.'
+  },
+  'Turn + clear': {
+    what: 'The athlete turns to face the pole and passes the bar. The highest hip position in the clip.',
+    check: ['The shoulders have turned over the bar line',
+            'The hips are at their highest point',
+            'The hands are still on the pole or just leaving it'],
+    fix: 'If the peak looks like it happens on a different frame, scrub to the frame where the hips are highest and use "Set this frame as" to move Turn + clear there.'
+  },
+  'Fly away': {
+    what: 'The hands release the pole and the body unrolls toward the pit.',
+    check: ['The hands are clear of the pole',
+            'The body is unrolling from the inverted position',
+            'The pole is falling away, no longer bent'],
+    fix: 'If the pole still looks attached to the hands, set the pole State on the right to "released" for this frame so it stops following the hand.'
+  },
+  'Land': {
+    what: 'Contact with the pit. Tracking is usually worst here because the athlete is partly hidden.',
+    check: ['The body is over the mat',
+            'The limbs are roughly where they are in the video',
+            'Nothing has jumped to a background object'],
+    fix: 'If the detector lost the athlete entirely, use "Set this frame as" on the last clean frame instead of fighting this one. A short clip that ends well beats a bad last frame.'
+  }
+};
+const G = { on: false, i: 0, done: {} };
+
+function stepFrameIndex(n) {
+  const k = S.data.keys[n];
+  return k ? S.data.frames.findIndex(f => f.frame === k.frame) : 0;
+}
+function renderGuide() {
+  const el = document.getElementById('guide');
+  el.classList.toggle('off', !G.on);
+  document.getElementById('startCard').style.display = G.on ? 'none' : '';
+  document.getElementById('guideStart').textContent = Object.keys(G.done).length ? 'Resume guided fixing' : 'Start guided fixing';
+  if (!G.on || !S.data) return;
+  const keys = S.data.keys, k = keys[G.i], st = STEPS[k.name] || { what: '', check: [], fix: '' };
+  document.getElementById('guideStep').textContent = `Step ${G.i + 1} of ${keys.length}`;
+  document.getElementById('guideTitle').textContent = k.name + '  (frame ' + k.frame + ')';
+  document.getElementById('guideWhat').textContent = st.what;
+  document.getElementById('guideCheck').innerHTML = st.check.map(c => `<li>${c}</li>`).join('');
+  document.getElementById('guideFix').textContent = st.fix;
+  document.getElementById('guideBack').disabled = G.i === 0;
+  document.getElementById('guideNext').textContent = G.i === keys.length - 1 ? 'Finish' : 'Next step ▶';
+  const bar = document.getElementById('guideBar');
+  bar.innerHTML = keys.map((kk, n) => `<div class="${n === G.i ? 'cur' : (G.done[kk.name] ? 'done' : '')}" title="${kk.name}"></div>`).join('');
+  const n = Object.keys(G.done).length;
+  document.getElementById('guideDone').textContent = n ? `${n} of ${keys.length} checked` : '';
+  document.querySelectorAll('#keys button').forEach(b => b.classList.toggle('done', !!G.done[b.dataset.name]));
+}
+function guideGo(i) {
+  const keys = S.data.keys;
+  if (i >= keys.length) {   // finished
+    G.on = false; renderGuide();
+    alert('All nine positions checked. Save vault JSON to keep the corrections, or Save keys JSON for the drill library.');
+    return;
+  }
+  G.i = Math.max(0, i);
+  goto(stepFrameIndex(G.i));
+  renderGuide();
+}
+document.getElementById('guideStart').onclick = () => {
+  if (!S.data) { alert('Load a vault JSON first.'); return; }
+  G.on = true;
+  // resume at the first unchecked step
+  let i = S.data.keys.findIndex(k => !G.done[k.name]);
+  guideGo(i < 0 ? 0 : i);
+};
+document.getElementById('guideExit').onclick = () => { G.on = false; renderGuide(); };
+document.getElementById('guideBack').onclick = () => guideGo(G.i - 1);
+document.getElementById('guideNext').onclick = () => guideGo(G.i + 1);
+document.getElementById('guideLooksRight').onclick = () => {
+  G.done[S.data.keys[G.i].name] = true;
+  guideGo(G.i + 1);
+};
 
 // Served over http: auto-load the sample data and video from the repo.
 const params = new URLSearchParams(location.search);

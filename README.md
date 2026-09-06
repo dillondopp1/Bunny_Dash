@@ -108,7 +108,18 @@ of named positions with `t`, `hip`, `angles` and optionally `pole`.
 ## Tracing and fixing frames: pose-editor.html
 
 Open `pose-editor.html`, load the vault JSON, then load the video (or a set of
-frame images named `f_0034.jpg` style). The chosen video frame is shown
+frame images named `f_0034.jpg` style).
+
+**Guided fixing** is the easiest way in. Press "Start guided fixing" (or the g
+key) and the editor walks you through the nine positions one at a time. Each
+step jumps to that frame and tells you what the position is, three things to
+check against the video, and what to drag if it is wrong. "Looks right" marks
+the step checked and moves on, "Next step" moves on without marking, Back
+returns, and the bar along the top shows which positions you have confirmed.
+Enter is the same as Next. You can leave the guide at any point and keep
+editing by hand; progress is remembered until you load a different JSON.
+
+Working by hand: The chosen video frame is shown
 mirrored with the measured joints on top (green = left side, magenta = right,
 red bones, yellow torso line), the fixed-bone figure in blue and the modelled
 pole in orange. Drag any joint to correct it; the angles, hip and pole for that
