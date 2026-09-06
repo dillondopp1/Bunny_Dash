@@ -1,0 +1,4 @@
+*.mp4
+!output/*.mp4
+__pycache__/
+*_frames/

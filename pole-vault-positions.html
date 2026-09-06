@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pole Vault Positions</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --ink:#222; --muted:#777; --pole:#c86e1e; --bg:#faf8f5; --panel:#fff; --accent:#1e6ec8; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; color:var(--ink); background:#eee; }
+  header { padding:10px 16px; background:var(--panel); border-bottom:1px solid #ddd; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  button, select, input[type=file] { font:inherit; }
+  button { padding:4px 10px; border:1px solid #bbb; background:#f7f7f7; border-radius:4px; cursor:pointer; }
+  button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { padding:12px 16px; max-width:1040px; margin:0 auto; }
+  canvas { background:var(--bg); border:1px solid #ccc; display:block; max-width:100%; }
+  #controls { display:flex; gap:10px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+  #scrub { flex:1; min-width:200px; }
+  #status { color:var(--muted); min-width:220px; }
+  #keys { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+  #keys button { font-size:12px; }
+  #sequence { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  #sequence canvas { width:100%; height:auto; }
+  #sequence figure { margin:0; }
+  #sequence figcaption { text-align:center; font-size:12px; color:var(--muted); }
+  table { border-collapse:collapse; font-size:12px; margin-top:8px; }
+  td, th { padding:2px 8px; border-bottom:1px solid #e5e5e5; text-align:right; }
+  th { color:var(--muted); font-weight:normal; }
+  .hint { color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pole vault positions</h1>
+  <button id="viewSeq">Sequence</button>
+  <button id="viewAnim" class="on">Animate</button>
+  <span style="flex:1"></span>
+  <label>Source
+    <select id="mode">
+      <option value="keys">Key positions (spline)</option>
+      <option value="frames">Video frames</option>
+    </select>
+  </label>
+  <label>Load JSON <input type="file" id="file" accept="application/json"></label>
+  <button id="export">Export keys JSON</button>
+</header>
+<main>
+  <div id="animView">
+    <canvas id="c" width="1000" height="430"></canvas>
+    <div id="controls">
+      <button id="play">Play</button>
+      <input type="range" id="scrub" min="0" max="1000" value="0">
+      <label>Speed <select id="speed">
+        <option value="0.25">0.25x</option><option value="0.5" selected>0.5x</option>
+        <option value="1">1x</option></select></label>
+      <label><input type="checkbox" id="fit" checked> Fit to canvas</label>
+      <label><input type="checkbox" id="trail"> Hip trail</label>
+      <span id="status"></span>
+    </div>
+    <div id="keys"></div>
+    <table id="angles"></table>
+    <p class="hint">Angles in degrees: 0 = straight up, 90 = forward toward the pit, 180 = down. Values are continuous (unwrapped), so a full swing reads past 180 instead of flipping sign. Load a vault JSON from tools/process_pose.py to replace the positions, or a keys JSON from a drill library.</p>
+  </div>
+  <div id="seqView" style="display:none">
+    <div id="sequence"></div>
+  </div>
+</main>
+<script>
+const EMBEDDED = {"name": "vault_2018-05-24", "bones": {"torso": 44, "head": 16, "upperArm": 24, "forearm": 24, "thigh": 32, "shin": 32}, "canvas": {"width": 1000, "height": 430, "groundY": 340, "boxX": 560, "barY": 79.3}, "positions": [{"name": "Run", "frame": 0, "t": 0.0, "hip": [139.3, 279.0], "angles": {"torso": -4.2, "head": -42.2, "lUpperArm": -90.0, "lForearm": 64.9, "rUpperArm": 94.5, "rForearm": 57.5, "lThigh": 109.6, "lShin": 136.6, "rThigh": -154.1, "rShin": -85.2}, "pole": {"top": [156.9, 225.5], "tip": [493.7, 68.5], "bend": 0.0, "sag": 0.0, "angle": -115.0, "state": "carry"}}, {"name": "Plant", "frame": 4, "t": 0.1341, "hip": [196.2, 282.3], "angles": {"torso": -5.0, "head": 8.1, "lUpperArm": -284.9, "lForearm": 58.3, "rUpperArm": 18.4, "rForearm": 10.4, "lThigh": 136.3, "lShin": 189.1, "rThigh": -184.4, "rShin": -70.9}, "pole": {"top": [202.4, 203.8], "tip": [560.0, 340.0], "bend": 0.0, "sag": 0.0, "angle": -69.2, "state": "planted"}}, {"name": "Takeoff", "frame": 6, "t": 0.2011, "hip": [239.4, 274.9], "angles": {"torso": -3.7, "head": 2.2, "lUpperArm": -294.3, "lForearm": 29.4, "rUpperArm": -13.6, "rForearm": -21.5, "lThigh": 168.8, "lShin": 214.0, "rThigh": -244.2, "rShin": -109.3}, "pole": {"top": [224.1, 180.8], "tip": [560.0, 340.0], "bend": 0.0, "sag": 0.0, "angle": -64.6, "state": "planted"}}, {"name": "Swing", "frame": 16, "t": 0.5364, "hip": [396.4, 221.5], "angles": {"torso": -50.2, "head": -31.5, "lUpperArm": -316.7, "lForearm": -7.3, "rUpperArm": -35.1, "rForearm": -35.5, "lThigh": 120.3, "lShin": 129.2, "rThigh": -321.1, "rShin": -186.5}, "pole": {"top": [337.0, 160.5], "tip": [560.0, 340.0], "bend": 0.23, "sag": 95.7, "angle": -51.2, "state": "planted"}}, {"name": "Rockback", "frame": 35, "t": 1.1734, "hip": [510.6, 114.2], "angles": {"torso": -133.9, "head": -80.4, "lUpperArm": -279.2, "lForearm": -17.7, "rUpperArm": 9.6, "rForearm": -10.1, "lThigh": -23.1, "lShin": -12.0, "rThigh": -389.0, "rShin": -371.5}, "pole": {"top": [487.3, 93.4], "tip": [560.0, 340.0], "bend": 0.308, "sag": 105.1, "angle": -16.4, "state": "planted"}}, {"name": "Extension", "frame": 44, "t": 1.4751, "hip": [537.4, 46.6], "angles": {"torso": -143.6, "head": -131.8, "lUpperArm": -225.9, "lForearm": -68.5, "rUpperArm": 17.2, "rForearm": 72.2, "lThigh": 36.5, "lShin": 26.0, "rThigh": -316.3, "rShin": -329.4}, "pole": {"top": [527.6, 47.1], "tip": [560.0, 340.0], "bend": 0.207, "sag": 92.2, "angle": -6.3, "state": "planted"}}, {"name": "Turn + clear", "frame": 51, "t": 1.7097, "hip": [562.9, 21.8], "angles": {"torso": -123.1, "head": -117.4, "lUpperArm": -182.4, "lForearm": -179.7, "rUpperArm": 94.0, "rForearm": 221.0, "lThigh": 119.3, "lShin": 100.6, "rThigh": -256.3, "rShin": -275.2}, "pole": {"top": [540.5, 43.7], "tip": [560.0, 340.0], "bend": 0.201, "sag": 91.2, "angle": -3.8, "state": "planted"}}, {"name": "Fly away", "frame": 54, "t": 1.8103, "hip": [577.6, 26.8], "angles": {"torso": -92.6, "head": -109.7, "lUpperArm": -146.0, "lForearm": -141.2, "rUpperArm": 171.6, "rForearm": 225.9, "lThigh": 139.5, "lShin": 128.0, "rThigh": -248.5, "rShin": -280.0}, "pole": {"top": [537.4, 43.9], "tip": [560.0, 340.0], "bend": 0.201, "sag": 91.2, "angle": -4.4, "state": "planted"}}, {"name": "Land", "frame": 76, "t": 2.5479, "hip": [656.5, 223.4], "angles": {"torso": 42.9, "head": 40.1, "lUpperArm": -78.7, "lForearm": -11.8, "rUpperArm": 445.4, "rForearm": 335.4, "lThigh": 223.3, "lShin": 231.0, "rThigh": -81.0, "rShin": -121.6}, "pole": {"top": [805.8, 61.2], "tip": [560.0, 340.0], "bend": 0.0, "sag": 0.0, "angle": 41.4, "state": "released"}}]};
+const W = 1000, H = 430, GROUND = 340, BOX_X = 560;
+const state = { keys: null, frames: null, bones: null, barY: 120, mode: 'keys', t: 0, playing: false, view: 'anim', name: '' };
+
+function rad(a) { return a * Math.PI / 180; }
+function segEnd(p, ang, len) { const a = rad(ang); return [p[0] + len * Math.sin(a), p[1] - len * Math.cos(a)]; }
+
+// Forward kinematics: hip + angles -> all joints, with fixed bone lengths.
+function figure(pos, bones) {
+  const A = pos.angles, hip = pos.hip;
+  const sho = segEnd(hip, A.torso, bones.torso);
+  const head = segEnd(sho, A.head, bones.head);
+  const segs = [['torso', hip, sho]];
+  const wrists = [];
+  for (const s of ['l', 'r']) {
+    const el = segEnd(sho, A[s + 'UpperArm'], bones.upperArm);
+    const wr = segEnd(el, A[s + 'Forearm'], bones.forearm);
+    const kn = segEnd(hip, A[s + 'Thigh'], bones.thigh);
+    const an = segEnd(kn, A[s + 'Shin'], bones.shin);
+    segs.push([s + 'UpperArm', sho, el], [s + 'Forearm', el, wr], [s + 'Thigh', hip, kn], [s + 'Shin', kn, an]);
+    wrists.push(wr);
+  }
+  return { hip, sho, head, segs, wrists };
+}
+
+function topHand(fig) {
+  return fig.wrists.reduce((a, b) => Math.hypot(a[0] - BOX_X, a[1] - GROUND) >= Math.hypot(b[0] - BOX_X, b[1] - GROUND) ? a : b);
+}
+
+// Uniform shrink about the box (ground level) so the highest point stays on the canvas.
+function fitFactor(positions, bones) {
+  let top = Infinity;
+  for (const p of positions) {
+    const f = figure(p, bones);
+    top = Math.min(top, f.head[1] - bones.head);
+    for (const [, , b] of f.segs) top = Math.min(top, b[1]);
+    if (p.pole && p.pole.top) top = Math.min(top, p.pole.top[1]);
+    if (p.pole && p.pole.tip) top = Math.min(top, p.pole.tip[1]);
+  }
+  const margin = 12;
+  return top >= margin ? 1 : (GROUND - margin) / (GROUND - top);
+}
+
+function drawScene(ctx, f, barY) {
+  ctx.fillStyle = '#faf8f5'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+  ctx.fillStyle = '#888';
+  ctx.beginPath(); ctx.moveTo(BOX_X - 40, GROUND); ctx.lineTo(BOX_X, GROUND); ctx.lineTo(BOX_X, GROUND + 12); ctx.lineTo(BOX_X - 30, GROUND + 12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#ebd7c0'; ctx.fillRect(610, GROUND - 40, W - 610, 40);
+  ctx.strokeStyle = '#bfa88f'; ctx.lineWidth = 1; ctx.strokeRect(610, GROUND - 40, W - 610, 40);
+  ctx.strokeStyle = '#999'; ctx.lineWidth = 2;
+  for (const x of [600, 640]) { ctx.beginPath(); ctx.moveTo(x, GROUND); ctx.lineTo(x, 30); ctx.stroke(); }
+  const by = GROUND + (barY - GROUND) * f;
+  ctx.strokeStyle = '#dc7800'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(596, by); ctx.lineTo(644, by); ctx.stroke();
+}
+
+function tf(p, f) { return [BOX_X + (p[0] - BOX_X) * f, GROUND + (p[1] - GROUND) * f]; }
+
+function drawPole(ctx, pos, fig, f) {
+  const pole = pos.pole; if (!pole) return;
+  const tip = tf(pole.tip, f);
+  const top = pole.state === 'released' ? tf(pole.top, f) : tf(topHand(fig), f);
+  ctx.strokeStyle = '#c86e1e'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(tip[0], tip[1]);
+  const sag = (pole.sag || 0) * f;
+  if (pole.state === 'planted' && sag > 0) {
+    const dx = top[0] - tip[0], dy = top[1] - tip[1], L = Math.hypot(dx, dy) || 1;
+    let nx = -dy / L, ny = dx / L;
+    if (nx > 0 || (Math.abs(nx) < 1e-6 && ny > 0)) { nx = -nx; ny = -ny; }
+    const cx = (top[0] + tip[0]) / 2 + nx * sag, cy = (top[1] + tip[1]) / 2 + ny * sag;
+    ctx.quadraticCurveTo(cx, cy, top[0], top[1]);
+  } else {
+    ctx.lineTo(top[0], top[1]);
+  }
+  ctx.stroke();
+}
+
+function drawFigure(ctx, fig, bones, f) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const [name, a, b] of fig.segs) {
+    ctx.strokeStyle = name.startsWith('r') ? '#8a8a8a' : '#222';
+    ctx.lineWidth = 4;
+    const A = tf(a, f), B = tf(b, f);
+    ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
+  }
+  const hd = tf(fig.head, f);
+  ctx.beginPath(); ctx.arc(hd[0], hd[1], bones.head * 0.6 * f, 0, Math.PI * 2);
+  ctx.fillStyle = '#eee'; ctx.fill(); ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.stroke();
+}
+
+function drawPosition(ctx, pos, bones, f, barY, label) {
+  drawScene(ctx, f, barY);
+  const fig = figure(pos, bones);
+  drawPole(ctx, pos, fig, f);
+  drawFigure(ctx, fig, bones, f);
+  if (label) { ctx.fillStyle = '#333'; ctx.font = '14px system-ui, sans-serif'; ctx.fillText(label, 12, 22); }
+}
+
+// Cubic Hermite (Catmull-Rom tangents) through the keys, parameterised by key time.
+function hermite(p0, p1, m0, m1, u) {
+  const u2 = u * u, u3 = u2 * u;
+  return (2 * u3 - 3 * u2 + 1) * p0 + (u3 - 2 * u2 + u) * m0 + (-2 * u3 + 3 * u2) * p1 + (u3 - u2) * m1;
+}
+function interpKeys(keys, t) {
+  const n = keys.length;
+  if (t <= keys[0].t) return keys[0];
+  if (t >= keys[n - 1].t) return keys[n - 1];
+  let i = 0; while (i < n - 2 && keys[i + 1].t <= t) i++;
+  const k0 = keys[Math.max(i - 1, 0)], k1 = keys[i], k2 = keys[i + 1], k3 = keys[Math.min(i + 2, n - 1)];
+  const h = k2.t - k1.t, u = (t - k1.t) / h;
+  const get = (k, path) => path.length === 1 ? k[path[0]] : k[path[0]][path[1]];
+  const chan = (path) => {
+    const v0 = get(k0, path), v1 = get(k1, path), v2 = get(k2, path), v3 = get(k3, path);
+    const m1 = (v2 - v0) / ((k2.t - k0.t) || h) * h, m2 = (v3 - v1) / ((k3.t - k1.t) || h) * h;
+    return hermite(v1, v2, m1, m2, u);
+  };
+  const out = { t, angles: {}, hip: [chan(['hip', 0]), chan(['hip', 1])] };
+  for (const a in k1.angles) out.angles[a] = chan(['angles', a]);
+  const p1 = k1.pole, p2 = k2.pole;
+  if (p1 && p2) {
+    const lin = (a, b) => a + (b - a) * u;
+    out.pole = {
+      state: u < 0.5 ? p1.state : p2.state,
+      tip: [lin(p1.tip[0], p2.tip[0]), lin(p1.tip[1], p2.tip[1])],
+      top: [lin(p1.top[0], p2.top[0]), lin(p1.top[1], p2.top[1])],
+      sag: lin(p1.sag || 0, p2.sag || 0), bend: lin(p1.bend || 0, p2.bend || 0)
+    };
+    if (p1.state === 'planted' && p2.state === 'planted') out.pole.state = 'planted';
+  }
+  return out;
+}
+
+function positionsForMode() {
+  return state.mode === 'frames' && state.frames ? state.frames : state.keys;
+}
+function duration() { const p = positionsForMode(); return p[p.length - 1].t - p[0].t; }
+function currentPosition() {
+  const p = positionsForMode();
+  const t = p[0].t + state.t * duration();
+  if (state.mode === 'frames' && state.frames) {
+    // nearest frame, no interpolation: this is the measured data
+    let best = p[0]; for (const fr of p) if (Math.abs(fr.t - t) < Math.abs(best.t - t)) best = fr;
+    return best;
+  }
+  return interpKeys(p, t);
+}
+
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+let fitF = 1;
+function recomputeFit() {
+  const all = (state.frames || []).concat(state.keys);
+  fitF = document.getElementById('fit').checked ? fitFactor(all, state.bones) : 1;
+}
+function render() {
+  const pos = currentPosition();
+  const label = pos.name ? pos.name : (pos.frame !== undefined ? 'frame ' + pos.frame : '');
+  drawPosition(ctx, pos, state.bones, fitF, state.barY, `${state.name}  ${label}  t=${pos.t.toFixed(2)}s`);
+  if (document.getElementById('trail').checked) {
+    const p = positionsForMode();
+    ctx.strokeStyle = 'rgba(30,110,200,0.5)'; ctx.lineWidth = 1.5; ctx.beginPath();
+    p.forEach((q, i) => { const h = tf(q.hip, fitF); i ? ctx.lineTo(h[0], h[1]) : ctx.moveTo(h[0], h[1]); });
+    ctx.stroke();
+  }
+  document.getElementById('scrub').value = Math.round(state.t * 1000);
+  document.getElementById('status').textContent = label + (state.mode === 'frames' ? '  (video frame)' : '  (spline)');
+  const tbl = document.getElementById('angles');
+  const names = Object.keys(pos.angles);
+  tbl.innerHTML = '<tr>' + names.map(n => `<th>${n}</th>`).join('') + '<th>hip x</th><th>hip y</th><th>pole bend</th></tr>' +
+    '<tr>' + names.map(n => `<td>${pos.angles[n].toFixed(0)}</td>`).join('') +
+    `<td>${pos.hip[0].toFixed(0)}</td><td>${pos.hip[1].toFixed(0)}</td><td>${pos.pole ? ((pos.pole.bend || 0) * 100).toFixed(0) + '%' : ''}</td></tr>`;
+}
+
+function renderSequence() {
+  const host = document.getElementById('sequence'); host.innerHTML = '';
+  const f = document.getElementById('fit').checked ? fitFactor(state.keys, state.bones) : 1;
+  for (const k of state.keys) {
+    const fig = document.createElement('figure');
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    drawPosition(cv.getContext('2d'), k, state.bones, f, state.barY, '');
+    const cap = document.createElement('figcaption'); cap.textContent = k.name + (k.frame !== undefined ? ` (frame ${k.frame})` : '');
+    fig.append(cv, cap); host.append(fig);
+  }
+}
+
+function buildKeyButtons() {
+  const host = document.getElementById('keys'); host.innerHTML = '';
+  state.keys.forEach((k, i) => {
+    const b = document.createElement('button'); b.textContent = k.name;
+    b.onclick = () => { state.playing = false; document.getElementById('play').textContent = 'Play';
+      const p = positionsForMode(); state.t = (k.t - p[0].t) / duration(); render(); };
+    host.append(b);
+  });
+}
+
+function loadData(obj) {
+  state.bones = obj.bones || state.bones || { torso: 44, head: 16, upperArm: 24, forearm: 24, thigh: 32, shin: 32 };
+  state.barY = (obj.canvas && obj.canvas.barY) || 120;
+  state.name = obj.name || '';
+  if (obj.frames) {
+    state.frames = obj.frames;
+    const byFrame = {}; obj.frames.forEach(fr => byFrame[fr.frame] = fr);
+    state.keys = obj.keys.map(k => Object.assign({}, byFrame[k.frame], { name: k.name }));
+  } else if (obj.positions) {
+    state.keys = obj.positions; state.frames = null;
+    if (state.keys.some(k => k.t === undefined)) state.keys.forEach((k, i) => k.t = i * 0.3);
+  }
+  if (!state.frames) document.getElementById('mode').value = state.mode = 'keys';
+  state.t = 0; recomputeFit(); buildKeyButtons(); render(); renderSequence();
+}
+
+document.getElementById('file').addEventListener('change', ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  const r = new FileReader(); r.onload = () => loadData(JSON.parse(r.result)); r.readAsText(f);
+});
+document.getElementById('export').onclick = () => {
+  const out = { name: state.name, bones: state.bones, canvas: { width: W, height: H, groundY: GROUND, boxX: BOX_X, barY: state.barY },
+    angleConvention: 'degrees, 0 = straight up, 90 = forward toward the pit, 180 = down; unwrapped',
+    positions: state.keys.map(k => ({ name: k.name, frame: k.frame, t: k.t, hip: k.hip, angles: k.angles, pole: k.pole })) };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' }));
+  a.download = (state.name || 'positions') + '_keys.json'; a.click();
+};
+document.getElementById('mode').onchange = ev => { state.mode = ev.target.value; if (state.mode === 'frames' && !state.frames) { alert('No video frames loaded. Load a vault JSON first.'); state.mode = 'keys'; ev.target.value = 'keys'; } render(); };
+document.getElementById('fit').onchange = () => { recomputeFit(); render(); renderSequence(); };
+document.getElementById('trail').onchange = render;
+document.getElementById('scrub').oninput = ev => { state.t = ev.target.value / 1000; render(); };
+document.getElementById('play').onclick = () => { state.playing = !state.playing; document.getElementById('play').textContent = state.playing ? 'Pause' : 'Play'; last = null; if (state.playing) requestAnimationFrame(tick); };
+document.getElementById('viewSeq').onclick = () => setView('seq');
+document.getElementById('viewAnim').onclick = () => setView('anim');
+function setView(v) {
+  state.view = v;
+  document.getElementById('animView').style.display = v === 'anim' ? '' : 'none';
+  document.getElementById('seqView').style.display = v === 'seq' ? '' : 'none';
+  document.getElementById('viewSeq').classList.toggle('on', v === 'seq');
+  document.getElementById('viewAnim').classList.toggle('on', v === 'anim');
+  if (v === 'seq') renderSequence();
+}
+let last = null;
+function tick(now) {
+  if (!state.playing) return;
+  if (last !== null) {
+    const speed = parseFloat(document.getElementById('speed').value);
+    state.t += (now - last) / 1000 * speed / duration();
+    if (state.t > 1) state.t -= 1;
+  }
+  last = now; render(); requestAnimationFrame(tick);
+}
+window.addEventListener('keydown', ev => {
+  if (ev.key === ' ') { ev.preventDefault(); document.getElementById('play').click(); }
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+    const p = positionsForMode(); const step = 1 / Math.max(p.length - 1, 1) * (state.mode === 'frames' ? 1 : 0.25);
+    state.t = Math.min(1, Math.max(0, state.t + (ev.key === 'ArrowRight' ? step : -step))); render();
+  }
+});
+
+loadData(EMBEDDED);
+// When served over http, pick up the full frame data next to this file.
+fetch('data/' + (EMBEDDED.name || 'vault') + '.json').then(r => r.ok ? r.json() : null).then(d => { if (d) loadData(d); }).catch(() => {});
+</script>
+</body>
+</html>
