@@ -204,10 +204,11 @@ def main():
 
     # Pass 1: full-frame tracking to find the best anchor frame.
     rough = []
-    for rgb in rgbs:
+    for si, rgb in enumerate(rgbs):
         lms = landmarks_to_dict(full.process(rgb), w, h)
         vis = float(np.mean([lms[k][2] for k in CORE])) if lms else 0.0
         rough.append((lms, vis))
+        print(f"scan {si + 1}/{n}", flush=True)
     # Anchor: frame with the highest visibility, preferring a run of good frames.
     vis_arr = np.array([v for _, v in rough])
     run_score = np.convolve(vis_arr, np.ones(5) / 5, mode="same")
@@ -231,7 +232,7 @@ def main():
             results[i] = {"frame": i, "t": i / fps, "ok": ok, "rotation": k * 90,
                           "score": float(s), "visibility": float(vis),
                           "crop": list(crop) if crop else None, "landmarks": lms if ok else None}
-            print(f"frame {i}: {'ok ' if ok else 'BAD'} rot {k * 90:3d} vis {vis:.2f} score {s:.2f}")
+            print(f"frame {i}: {'ok ' if ok else 'BAD'} rot {k * 90:3d} vis {vis:.2f} score {s:.2f}", flush=True)
             if ok:
                 prev, prev_box = lms, crop
             if args.debug_dir and lms is not None:

@@ -3,6 +3,31 @@
 Tools for turning a side-on pole vault clip into a stick figure animation and
 a JSON of per-frame joint angles that plays in `pole-vault-positions.html`.
 
+## Quick start: drop in a video
+
+```
+pip install -r requirements.txt
+python tools/vault_app.py
+```
+
+That opens a page in your browser. Drag a vault clip onto it. The clip is split
+into frames, every frame is run through pose detection, and when it finishes
+the editor opens on the result with the skeleton and the pole drawn over each
+frame, ready to drag. A 3 second clip takes about a minute on a laptop.
+Everything runs on your own machine; nothing is uploaded anywhere.
+
+Processed clips are listed in the dropdown at the top of the page, so you can
+come back to one later. Add `?vault=name` to the URL to open a specific one.
+
+The one thing the app cannot work out for itself is the plant box: no pose
+model detects a pole, so it estimates the box from the line through both hands
+and then asks you to click the exact spot. That estimate can be off by a foot
+or more, and everything about the pole depends on it, so it is worth the one
+click. Clicking re-anchors the whole clip and recomputes the grip length.
+
+The steps below are the same pipeline run by hand, which is what you want for
+batching several clips or changing the smoothing.
+
 ## Pipeline
 
 ```

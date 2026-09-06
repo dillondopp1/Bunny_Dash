@@ -46,6 +46,17 @@
   #keys button.done { border-color:#3a9d5d; color:#2c7a48; }
   .startCard { background:#fff; border:1px solid #ddd; border-radius:6px; padding:14px; margin-bottom:10px; }
   .startCard ol { margin:6px 0 0; padding-left:20px; }
+  #drop { border:2px dashed #b6c6da; border-radius:8px; background:#f7fafd; padding:22px; text-align:center; cursor:pointer; }
+  #drop.over { border-color:#1e6ec8; background:#e9f2fc; }
+  #drop b { font-size:16px; }
+  #prog { display:none; margin-top:10px; }
+  #progOuter { height:10px; background:#e2e2e2; border-radius:5px; overflow:hidden; }
+  #progInner { height:100%; width:0; background:#1e6ec8; transition:width .3s; }
+  #progText { font-size:13px; color:#555; margin-top:6px; }
+  #boxPrompt { display:none; background:#fff8e8; border:1px solid #e0c48a; border-left:4px solid #dc7800; border-radius:6px; padding:10px 12px; margin-bottom:10px; }
+  #boxPrompt.show { display:block; }
+  body.picking canvas#c { cursor:crosshair; }
+  .err { color:#b3261e; }
   .startCard li { margin:3px 0; }
 </style>
 </head>
@@ -62,11 +73,26 @@
 <main>
   <div>
     <div class="startCard" id="startCard">
-      <b>Start here.</b> Load the vault JSON, then the video (or the frame images) with the buttons above.
-      <ol>
-        <li>Press <b>Start guided fixing</b> to be walked through the nine positions one at a time.</li>
-        <li>Or press a numbered key button to jump straight to a position and drag joints freely.</li>
-      </ol>
+      <div id="drop">
+        <b>Drop a vault video here</b><br>
+        <span class="hint">or click to choose one. Side on, athlete large in frame. It stays on this computer.</span>
+      </div>
+      <div id="prog">
+        <div id="progOuter"><div id="progInner"></div></div>
+        <div id="progText"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label>Already processed <select id="vaultPick"><option value="">(choose a clip)</option></select></label>
+        <span class="hint" id="offlineNote"></span>
+      </div>
+    </div>
+    <div id="boxPrompt">
+      <b>One thing to set: where is the plant box?</b>
+      <div style="margin:4px 0 8px">The pole tip cannot be detected, so click the spot in the frame where the pole
+      goes into the box. Pick a frame where you can see the pole running down to it.</div>
+      <button id="pickBox" class="primary">Click the box in the frame</button>
+      <button id="boxLater">Keep the estimate</button>
+      <span class="hint" id="boxState"></span>
     </div>
     <div id="guide" class="off">
       <div id="guideBar"></div>
@@ -246,6 +272,12 @@ function draw() {
     for (const [, a, b] of F.segs) { const A = toPx(a), B = toPx(b); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); }
     const hd = toPx(F.head); ctx.beginPath(); ctx.arc(hd[0], hd[1], S.data.bones.head * 0.6 / s.scale, 0, Math.PI * 2); ctx.stroke();
   }
+  // where the pole tip is assumed to be
+  const bpx = toPx([BOX_X, GROUND]);
+  ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 2 / view.s;
+  const r = 10 / view.s;
+  ctx.beginPath(); ctx.moveTo(bpx[0] - r, bpx[1]); ctx.lineTo(bpx[0] + r, bpx[1]);
+  ctx.moveTo(bpx[0], bpx[1] - r); ctx.lineTo(bpx[0], bpx[1] + r); ctx.stroke();
   // measured joints
   ctx.lineWidth = lw; ctx.strokeStyle = '#ff3b3b';
   for (const [a, b] of CONN) { const A = toPx(fr.joints[a]), B = toPx(fr.joints[b]); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); }
@@ -311,7 +343,17 @@ function pickJoint(wx, wy) {
   return best;
 }
 function mousePos(ev) { const r = cv.getBoundingClientRect(); return toWorld((ev.clientX - r.left) * cv.width / r.width, (ev.clientY - r.top) * cv.height / r.height); }
-cv.addEventListener('pointerdown', ev => { if (!S.data) return; const [x, y] = mousePos(ev); S.drag = pickJoint(x, y); if (S.drag) cv.setPointerCapture(ev.pointerId); draw(); });
+cv.addEventListener('pointerdown', ev => {
+  if (!S.data) return;
+  const [x, y] = mousePos(ev);
+  if (picking) {
+    picking = false; document.body.classList.remove('picking');
+    applyBox(x, y);
+    document.getElementById('boxState').textContent = 'Box set. Click again to adjust.';
+    return;
+  }
+  S.drag = pickJoint(x, y); if (S.drag) cv.setPointerCapture(ev.pointerId); draw();
+});
 cv.addEventListener('pointermove', ev => { if (!S.drag) return; const [x, y] = mousePos(ev); S.data.frames[S.i].joints[S.drag] = fromPx([x, y]).map(v => Math.round(v * 10) / 10); recompute(S.i); draw(); });
 cv.addEventListener('pointerup', () => { S.drag = null; draw(); });
 
@@ -498,17 +540,146 @@ document.getElementById('guideLooksRight').onclick = () => {
   guideGo(G.i + 1);
 };
 
-// Served over http: auto-load the sample data and video from the repo.
+// ---------------------------------------------------------------------------
+// Upload and processing. Talks to tools/vault_app.py; when the page is opened
+// without that server the upload panel disables itself and the file pickers in
+// the header remain the way in.
+// ---------------------------------------------------------------------------
+let hasServer = false;
+function setProgress(pct, text, isError) {
+  document.getElementById('prog').style.display = 'block';
+  document.getElementById('progInner').style.width = Math.max(0, Math.min(100, pct)) + '%';
+  const t = document.getElementById('progText');
+  t.textContent = text; t.className = isError ? 'err' : '';
+}
+function uploadVideo(file) {
+  if (!file) return;
+  if (!hasServer) { alert('Video processing needs the app server. Start it with:\n\npython tools/vault_app.py'); return; }
+  document.getElementById('drop').style.display = 'none';
+  setProgress(2, 'Uploading ' + file.name + '…');
+  fetch('/api/upload?filename=' + encodeURIComponent(file.name), { method: 'POST', body: file })
+    .then(r => r.json())
+    .then(res => {
+      if (res.error) throw new Error(res.error);
+      pollJob(res.job);
+    })
+    .catch(e => { setProgress(100, 'Upload failed: ' + e.message, true); document.getElementById('drop').style.display = ''; });
+}
+function pollJob(id) {
+  fetch('/api/job?id=' + id).then(r => r.json()).then(j => {
+    if (j.error) {
+      setProgress(100, 'Processing failed: ' + j.error, true);
+      document.getElementById('drop').style.display = '';
+      return;
+    }
+    setProgress(j.pct || 0, (j.stage || 'Working') + (j.message ? ' — ' + j.message : ''));
+    if (!j.done) { setTimeout(() => pollJob(id), 500); return; }
+    setProgress(100, 'Done: ' + (j.message || '') + '. Opening the clip…');
+    openVault(j.name).then(() => {
+      document.getElementById('drop').style.display = '';
+      document.getElementById('prog').style.display = 'none';
+      refreshVaults();
+      document.getElementById('boxPrompt').classList.add('show');
+      document.getElementById('boxState').textContent = 'Estimated from the hands, worth correcting.';
+    });
+  }).catch(() => setTimeout(() => pollJob(id), 1500));
+}
+function openVault(name) {
+  return fetch('data/' + name + '.json').then(r => r.json()).then(d => {
+    loadData(d);
+    const dir = 'data/frames/' + name + '/';
+    S.images = {}; S.imgCache = {};
+    d.frames.forEach(f => S.images[f.frame] = dir + 'f_' + String(f.frame).padStart(4, '0') + '.jpg');
+    draw();
+    document.getElementById('vaultPick').value = name;
+  });
+}
+function refreshVaults() {
+  return fetch('/api/vaults').then(r => r.json()).then(v => {
+    hasServer = true;
+    const sel = document.getElementById('vaultPick');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">(choose a clip)</option>' + v.vaults.map(n => `<option>${n}</option>`).join('');
+    sel.value = cur;
+  }).catch(() => {
+    hasServer = false;
+    document.getElementById('drop').style.opacity = .5;
+    document.getElementById('offlineNote').textContent = 'Start tools/vault_app.py to process a video here.';
+  });
+}
+const drop = document.getElementById('drop');
+const hiddenPick = document.createElement('input');
+hiddenPick.type = 'file'; hiddenPick.accept = 'video/*'; hiddenPick.id = 'videoPick';
+hiddenPick.style.display = 'none';
+hiddenPick.onchange = () => uploadVideo(hiddenPick.files[0]);
+drop.append(hiddenPick);
+drop.onclick = ev => { if (ev.target !== hiddenPick) hiddenPick.click(); };
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('over');
+  const f = e.dataTransfer.files[0];
+  if (f) uploadVideo(f);
+});
+document.getElementById('vaultPick').onchange = ev => { if (ev.target.value) openVault(ev.target.value); };
+
+// ---------------------------------------------------------------------------
+// Setting the plant box by clicking the frame. Moving the box shifts every
+// joint by the same amount (the canvas mapping is anchored on the box), then
+// the grip length and the pole are rebuilt from the takeoff frame.
+// ---------------------------------------------------------------------------
+let picking = false;
+function startPickBox() {
+  picking = true; document.body.classList.add('picking');
+  // Show the whole frame, and move to a frame where the pole runs down to the
+  // box so there is something to aim at.
+  document.getElementById('zoom').value = '1';
+  const fr = S.data.frames[S.i];
+  if (!fr.pole || fr.pole.state !== 'planted') {
+    const tk = S.data.pole.takeoffFrame, rl = S.data.pole.releaseFrame;
+    const target = Math.round(tk + (rl - tk) * 0.35);
+    const i = S.data.frames.findIndex(f => f.frame >= target);
+    if (i >= 0) goto(i);
+  }
+  draw();
+  document.getElementById('boxState').textContent = 'Click the box in the frame above.';
+}
+function applyBox(mx, my) {
+  const s = src();
+  const bxOld = s.mirrored ? s.width - s.box_px[0] : s.box_px[0];
+  const dx = (bxOld - mx) * s.scale, dy = (s.box_px[1] - my) * s.scale;
+  for (const fr of S.data.frames) {
+    for (const n in fr.joints) { fr.joints[n][0] += dx; fr.joints[n][1] += dy; }
+  }
+  s.box_px = [s.mirrored ? s.width - mx : mx, my];
+  // grip is measured from the top hand to the box at takeoff
+  const tk = S.data.frames.findIndex(f => f.frame === S.data.pole.takeoffFrame);
+  const ref = S.data.frames[tk >= 0 ? tk : 0];
+  const box = [BOX_X, GROUND];
+  const wr = [ref.joints.l_wrist, ref.joints.r_wrist];
+  const top = wr.reduce((a, b) => Math.hypot(a[0] - box[0], a[1] - box[1]) >= Math.hypot(b[0] - box[0], b[1] - box[1]) ? a : b);
+  S.data.pole.gripLength = Math.round(Math.hypot(top[0] - box[0], top[1] - box[1]) * 10) / 10;
+  document.getElementById('grip').value = S.data.pole.gripLength;
+  S.data.frames.forEach((f, k) => recompute(k));
+  S.orig = JSON.parse(JSON.stringify(S.data));   // this is the new baseline, not an edit
+  S.data.frames.forEach(f => f.edited = false);
+  draw();
+}
+document.getElementById('pickBox').onclick = startPickBox;
+document.getElementById('boxLater').onclick = () => {
+  picking = false; document.body.classList.remove('picking');
+  document.getElementById('boxPrompt').classList.remove('show');
+};
+
+// Served over http: list what has been processed and open the newest clip.
 const params = new URLSearchParams(location.search);
-const name = params.get('vault') || 'vault_2018-05-24';
-fetch('data/' + name + '.json').then(r => r.ok ? r.json() : null).then(d => {
-  if (!d) return; loadData(d);
-  const dir = 'data/frames/' + name + '/';
-  fetch(dir + 'f_0000.jpg', { method: 'HEAD' }).then(r => {
-    if (r.ok) { S.images = {}; d.frames.forEach(f => S.images[f.frame] = dir + 'f_' + String(f.frame).padStart(4, '0') + '.jpg'); draw(); }
-    else return fetch(d.source.video, { method: 'HEAD' }).then(r => { if (r.ok) attachVideo(d.source.video); });
-  }).catch(() => {});
-}).catch(() => {});
+refreshVaults().then(() => {
+  const want = params.get('vault');
+  const sel = document.getElementById('vaultPick');
+  const names = [...sel.options].map(o => o.value).filter(Boolean);
+  const pick = want && names.includes(want) ? want : names[0];
+  if (pick) openVault(pick);
+});
 </script>
 </body>
 </html>

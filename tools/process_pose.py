@@ -138,6 +138,40 @@ def pole_sag(chord, length):
     return math.sqrt(3.0 * chord * (length - chord) / 8.0)
 
 
+def guess_box(sm, ok, first, last, torso_px, height):
+    """Estimate the plant box in video pixels.
+
+    Both hands are on the pole, so the pole runs along the line from the top
+    hand through the bottom hand. Extending that line to ground level lands on
+    the box. Averaged over the frames just before the athlete leaves the
+    ground, where the pole is still straight and both hands are gripping.
+    """
+    feet = np.nanmax(np.stack([sm[f"{s}_{j}"][:, 1] for s in "lr" for j in ("heel", "foot", "ankle")]), 0)
+    early = slice(first, first + max(3, (last - first) // 4))
+    ground = float(np.nanpercentile(feet[early][~np.isnan(feet[early])], 90))
+    hips = (sm["l_hip"][:, 1] + sm["r_hip"][:, 1]) / 2
+    # ground contact ends when the feet lift clear of ground level
+    contact = feet > ground - 0.15 * torso_px
+    peak = int(np.nanargmin(hips[first:last + 1])) + first
+    onground = np.where(contact[first:peak])[0]
+    takeoff = int(onground.max()) + first if len(onground) else first
+    xs = []
+    for i in range(max(first, takeoff - 4), takeoff + 1):
+        a, b = sm["l_wrist"][i], sm["r_wrist"][i]
+        if np.isnan(a).any() or np.isnan(b).any():
+            continue
+        top, bot = (a, b) if a[1] < b[1] else (b, a)   # smaller y is higher
+        dy = bot[1] - top[1]
+        if dy < 0.15 * torso_px:                        # hands level, no direction
+            continue
+        t = (ground - top[1]) / dy
+        xs.append(top[0] + (bot[0] - top[0]) * t)
+    if not xs:
+        hip_x = (sm["l_hip"][:, 0] + sm["r_hip"][:, 0]) / 2
+        return np.array([hip_x[takeoff], ground])
+    return np.array([float(np.median(xs)), ground])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("raw")
@@ -180,10 +214,8 @@ def main():
     if args.box:
         box_px = np.array(args.box, float)
     else:
-        feet = np.nanmax(np.stack([sm[f"{s}_{j}"][:, 1] for s in "lr" for j in ("heel", "foot", "ankle")]), 0)
-        ground_px = float(np.nanpercentile(feet[first:first + max(3, (last - first) // 4)], 90))
-        box_px = np.array([hip_x[mid], ground_px])
-        print("no --box given, guessing box at", box_px.round(0))
+        box_px = guess_box(sm, ok, first, last, torso_px, H)
+        print("no --box given, estimating box at", box_px.round(0))
 
     def to_canvas(p):
         x = (W - p[0]) if mirror else p[0]
