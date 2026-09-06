@@ -1043,5 +1043,9 @@
    "quality": 0.8,
    "name": "Land"
   }
- ]
+ ],
+ "poleStyle": {
+  "bendToward": "pit",
+  "bendScale": 1.0
+ }
 }

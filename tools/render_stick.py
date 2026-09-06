@@ -27,6 +27,7 @@ INK = (40, 40, 40)
 POLE = (30, 110, 200)
 SKEL = (20, 20, 20)
 HEAD_FILL = (230, 230, 230)
+STYLE = {}
 
 
 def seg_end(p, ang, length):
@@ -85,12 +86,17 @@ def draw_pole(img, fr, bones, use_fk_hand=True):
         d = (tip[0] - top[0], tip[1] - top[1])
         cv2.line(img, (int(top[0]), int(top[1])), (int(tip[0]), int(tip[1])), POLE, 3, cv2.LINE_AA)
         return
-    sag = pole.get("sag", 0.0)
+    style = STYLE.get("poleStyle") or {}
+    sag = pole.get("sag", 0.0) * float(style.get("bendScale", 1.0))
     cx, cy = (top[0] + tip[0]) / 2, (top[1] + tip[1]) / 2
     dx, dy = top[0] - tip[0], top[1] - tip[1]
     L = math.hypot(dx, dy) or 1.0
+    # Normal to the chord pointing toward the pit (+x). A loaded pole bows
+    # forward, so the curve bulges toward the pit; "runway" flips it.
     nx, ny = -dy / L, dx / L
-    if nx > 0 or (abs(nx) < 1e-6 and ny > 0):
+    if nx < 0 or (abs(nx) < 1e-6 and ny > 0):
+        nx, ny = -nx, -ny
+    if style.get("bendToward", "pit") == "runway":
         nx, ny = -nx, -ny
     ctrl = (cx + nx * sag, cy + ny * sag)
     pts = []
@@ -184,6 +190,7 @@ def main():
     args = ap.parse_args()
 
     data = json.load(open(args.json))
+    STYLE["poleStyle"] = data.get("poleStyle", {})
     if not args.no_fit:
         data, f = fit_data(data)
         if f < 1:

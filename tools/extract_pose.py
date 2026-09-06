@@ -175,6 +175,8 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--debug-dir", default=None, help="write per-frame overlay PNGs here")
     ap.add_argument("--min-det", type=float, default=0.3)
+    ap.add_argument("--frames-dir", default=None,
+                    help="also write every frame as JPEG here (underlay for pose-editor.html)")
     ap.add_argument("--min-vis", type=float, default=0.7,
                     help="frames whose core-joint visibility is below this are marked missing")
     ap.add_argument("--min-score", type=float, default=0.5,
@@ -188,6 +190,10 @@ def main():
     n = len(frames)
     print(f"{n} frames, {w}x{h}, {fps:.2f} fps")
     rgbs = [cv2.cvtColor(im, cv2.COLOR_BGR2RGB) for im in frames]
+    if args.frames_dir:
+        os.makedirs(args.frames_dir, exist_ok=True)
+        for i, im in enumerate(frames):
+            cv2.imwrite(os.path.join(args.frames_dir, f"f_{i:04d}.jpg"), im, [cv2.IMWRITE_JPEG_QUALITY, 88])
     if args.debug_dir:
         os.makedirs(args.debug_dir, exist_ok=True)
 

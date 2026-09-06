@@ -329,6 +329,7 @@ def main():
                    "barY": bar_y},
         "bones": BONES,
         "angleConvention": "degrees, 0 = straight up, 90 = forward toward the pit, 180 = down; unwrapped (continuous)",
+        "poleStyle": {"bendToward": "pit", "bendScale": 1.0},
         "pole": {"gripLength": round(grip, 1), "plantFrame": int(plant + first),
                  "takeoffFrame": int(takeoff + first), "releaseFrame": int(release + first)},
         "keys": [{"name": k, "frame": keys[k]} for k in KEY_NAMES],

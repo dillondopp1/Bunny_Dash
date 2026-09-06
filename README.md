@@ -105,6 +105,26 @@ the rebuilt figure, so the pole always meets the hand.
 format under `positions`. This is the drill library format: a drill is a list
 of named positions with `t`, `hip`, `angles` and optionally `pole`.
 
+## Tracing and fixing frames: pose-editor.html
+
+Open `pose-editor.html`, load the vault JSON, then load the video (or a set of
+frame images named `f_0034.jpg` style). The chosen video frame is shown
+mirrored with the measured joints on top (green = left side, magenta = right,
+red bones, yellow torso line), the fixed-bone figure in blue and the modelled
+pole in orange. Drag any joint to correct it; the angles, hip and pole for that
+frame are recomputed at once and the panel on the right shows the result on
+the 1000x430 canvas. Keys 1 to 9 jump to the nine positions, arrows step
+frames, "Set this frame as" re-assigns a key position, "Copy previous frame"
+seeds a lost frame. Pole controls: bend direction, bend scale, grip length and
+per-frame state (carry, planted, released). Save writes the corrected vault
+JSON or the keys JSON; render them with `tools/render_stick.py` or open them
+in the positions tool.
+
+Served over http the editor loads `data/<name>.json` automatically and uses
+`data/frames/<name>/f_%04d.jpg` when present (write them with
+`extract_pose.py --frames-dir data/frames/<name>`; the folder is ignored by git).
+Opened from disk, use the file pickers instead.
+
 ## The HTML tool
 
 Open `pole-vault-positions.html`. It embeds the nine key positions from the
@@ -128,9 +148,10 @@ body unrolls back past 90 degrees of rotation after the peak.
 
 ## Known limits and next steps
 
-- The pole tip and bend are modelled, not measured.
+- The pole tip and bend are modelled, not measured. The pole bows toward the
+  pit (`poleStyle.bendToward`), with `poleStyle.bendScale` to exaggerate or
+  soften it.
 - Frames with the body edge-on to the camera get foreshortened limbs; the
   angles are still taken in the image plane.
 - Fast phases at 30 fps blur; 60 fps clips will track better.
-- Next: a pose editor with a video frame underlay to drag joints on bad frames,
-  and a drill library built from `_keys.json` files.
+- Next: a drill library built from `_keys.json` files.

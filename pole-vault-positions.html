@@ -132,11 +132,14 @@ function drawPole(ctx, pos, fig, f) {
   const top = pole.state === 'released' ? tf(pole.top, f) : tf(topHand(fig), f);
   ctx.strokeStyle = '#c86e1e'; ctx.lineWidth = 3; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(tip[0], tip[1]);
-  const sag = (pole.sag || 0) * f;
+  const style = state.poleStyle || {};
+  const sag = (pole.sag || 0) * f * (style.bendScale === undefined ? 1 : style.bendScale);
   if (pole.state === 'planted' && sag > 0) {
     const dx = top[0] - tip[0], dy = top[1] - tip[1], L = Math.hypot(dx, dy) || 1;
+    // normal pointing toward the pit: a loaded pole bows forward
     let nx = -dy / L, ny = dx / L;
-    if (nx > 0 || (Math.abs(nx) < 1e-6 && ny > 0)) { nx = -nx; ny = -ny; }
+    if (nx < 0 || (Math.abs(nx) < 1e-6 && ny > 0)) { nx = -nx; ny = -ny; }
+    if (style.bendToward === 'runway') { nx = -nx; ny = -ny; }
     const cx = (top[0] + tip[0]) / 2 + nx * sag, cy = (top[1] + tip[1]) / 2 + ny * sag;
     ctx.quadraticCurveTo(cx, cy, top[0], top[1]);
   } else {
@@ -266,6 +269,7 @@ function loadData(obj) {
   state.bones = obj.bones || state.bones || { torso: 44, head: 16, upperArm: 24, forearm: 24, thigh: 32, shin: 32 };
   state.barY = (obj.canvas && obj.canvas.barY) || 120;
   state.name = obj.name || '';
+  state.poleStyle = obj.poleStyle || { bendToward: 'pit', bendScale: 1 };
   if (obj.frames) {
     state.frames = obj.frames;
     const byFrame = {}; obj.frames.forEach(fr => byFrame[fr.frame] = fr);
@@ -283,7 +287,7 @@ document.getElementById('file').addEventListener('change', ev => {
   const r = new FileReader(); r.onload = () => loadData(JSON.parse(r.result)); r.readAsText(f);
 });
 document.getElementById('export').onclick = () => {
-  const out = { name: state.name, bones: state.bones, canvas: { width: W, height: H, groundY: GROUND, boxX: BOX_X, barY: state.barY },
+  const out = { name: state.name, bones: state.bones, poleStyle: state.poleStyle, canvas: { width: W, height: H, groundY: GROUND, boxX: BOX_X, barY: state.barY },
     angleConvention: 'degrees, 0 = straight up, 90 = forward toward the pit, 180 = down; unwrapped',
     positions: state.keys.map(k => ({ name: k.name, frame: k.frame, t: k.t, hip: k.hip, angles: k.angles, pole: k.pole })) };
   const a = document.createElement('a');

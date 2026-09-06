@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pole Vault Pose Editor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; color:#222; background:#eee; }
+  header { padding:8px 16px; background:#fff; border-bottom:1px solid #ddd; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  main { padding:10px 16px; max-width:1300px; margin:0 auto; display:grid; grid-template-columns: 1fr 330px; gap:12px; }
+  @media (max-width:1000px) { main { grid-template-columns:1fr; } }
+  canvas { background:#111; display:block; max-width:100%; border:1px solid #ccc; }
+  #preview { background:#faf8f5; }
+  button, select, input { font:inherit; }
+  button { padding:4px 10px; border:1px solid #bbb; background:#f7f7f7; border-radius:4px; cursor:pointer; }
+  button.on { background:#1e6ec8; color:#fff; border-color:#1e6ec8; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+  .side { background:#fff; padding:10px; border:1px solid #ddd; border-radius:6px; }
+  .side h2 { font-size:13px; margin:8px 0 4px; color:#666; font-weight:normal; text-transform:uppercase; letter-spacing:.04em; }
+  table { border-collapse:collapse; font-size:12px; width:100%; }
+  td, th { padding:2px 6px; border-bottom:1px solid #eee; text-align:right; }
+  td:first-child, th:first-child { text-align:left; }
+  #keys button { font-size:12px; padding:3px 7px; }
+  #keys button.cur { outline:2px solid #dc7800; }
+  .hint { color:#777; font-size:12px; }
+  #scrub { width:100%; }
+  .edited { color:#c8501e; font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pose editor</h1>
+  <label>Vault JSON <input type="file" id="jsonFile" accept="application/json"></label>
+  <label>Video <input type="file" id="videoFile" accept="video/*"></label>
+  <label>or frame images <input type="file" id="framesFile" accept="image/*" multiple></label>
+  <span style="flex:1"></span>
+  <button id="save">Save vault JSON</button>
+  <button id="saveKeys">Save keys JSON</button>
+</header>
+<main>
+  <div>
+    <canvas id="c" width="1280" height="720"></canvas>
+    <div class="row">
+      <button id="prev">&#9664;</button>
+      <button id="next">&#9654;</button>
+      <input type="range" id="scrub" min="0" max="0" value="0" style="flex:1">
+      <span id="frameLabel"></span>
+    </div>
+    <div class="row">
+      <label>Zoom <select id="zoom"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option><option value="4">4x</option></select></label>
+      <label><input type="checkbox" id="showVideo" checked> Video</label>
+      <label><input type="checkbox" id="showFk" checked> Fixed-bone figure</label>
+      <label><input type="checkbox" id="showPole" checked> Pole</label>
+      <button id="reset">Reset frame</button>
+      <button id="copyPrev">Copy previous frame</button>
+      <span class="hint">Drag a joint. Arrows step frames, 1 to 9 jump to key positions.</span>
+    </div>
+    <div class="row" id="keys"></div>
+    <div class="row">
+      <label>Set this frame as <select id="assignKey"><option value="">(choose)</option></select></label>
+    </div>
+  </div>
+  <div class="side">
+    <h2>Result on the canvas</h2>
+    <canvas id="preview" width="1000" height="430"></canvas>
+    <h2>Pole</h2>
+    <div class="row">
+      <label>Bends toward <select id="bendToward"><option value="pit">pit</option><option value="runway">runway</option></select></label>
+      <label>Bend scale <input type="number" id="bendScale" step="0.1" min="0" max="3" value="1" style="width:60px"></label>
+    </div>
+    <div class="row">
+      <label>Grip length <input type="number" id="grip" step="1" style="width:70px"></label>
+      <label>State <select id="poleState"><option value="carry">carry</option><option value="planted">planted</option><option value="released">released</option></select></label>
+    </div>
+    <h2>Angles (this frame)</h2>
+    <table id="angles"></table>
+    <p class="hint">Joints are stored in canvas units. Dragging updates the angles from the joint positions; the fixed-bone figure is rebuilt from the hip and the angles, so it will not sit exactly on the dragged joints when limbs are foreshortened.</p>
+  </div>
+</main>
+<script>
+const GROUND = 340, BOX_X = 560;
+const CONN = [['l_shoulder','l_elbow'],['l_elbow','l_wrist'],['r_shoulder','r_elbow'],['r_elbow','r_wrist'],
+  ['l_hip','l_knee'],['l_knee','l_ankle'],['l_ankle','l_heel'],['l_ankle','l_foot'],
+  ['r_hip','r_knee'],['r_knee','r_ankle'],['r_ankle','r_heel'],['r_ankle','r_foot'],
+  ['l_shoulder','r_shoulder'],['l_hip','r_hip'],['l_ear','r_ear']];
+const KEY_NAMES = ['Run','Plant','Takeoff','Swing','Rockback','Extension','Turn + clear','Fly away','Land'];
+const S = { data:null, orig:null, i:0, video:null, videoReady:false, drag:null, images:null, imgCache:{} };
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const pv = document.getElementById('preview'), pctx = pv.getContext('2d');
+
+function src() { return S.data.source; }
+function toPx(p) { const s = src(); const bx = s.mirrored ? s.width - s.box_px[0] : s.box_px[0];
+  return [(p[0] - BOX_X) / s.scale + bx, (p[1] - GROUND) / s.scale + s.box_px[1]]; }
+function fromPx(q) { const s = src(); const bx = s.mirrored ? s.width - s.box_px[0] : s.box_px[0];
+  return [BOX_X + (q[0] - bx) * s.scale, GROUND + (q[1] - s.box_px[1]) * s.scale]; }
+function mid(a, b) { return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; }
+function angleDeg(a, b) { return Math.atan2(b[0] - a[0], -(b[1] - a[1])) * 180 / Math.PI; }
+function nearWrap(v, ref) { if (ref === undefined || ref === null) return v; while (v - ref > 180) v -= 360; while (v - ref < -180) v += 360; return v; }
+
+// Recompute hip, angles and pole of frame k from its joints (same rules as process_pose.py).
+function recompute(k) {
+  const fr = S.data.frames[k], J = fr.joints, prev = k > 0 ? S.data.frames[k - 1].angles : null;
+  const hip = mid(J.l_hip, J.r_hip), sho = mid(J.l_shoulder, J.r_shoulder), head = mid(J.l_ear, J.r_ear);
+  const A = {};
+  A.torso = angleDeg(hip, sho); A.head = angleDeg(sho, head);
+  for (const s of ['l', 'r']) {
+    A[s + 'UpperArm'] = angleDeg(J[s + '_shoulder'], J[s + '_elbow']);
+    A[s + 'Forearm'] = angleDeg(J[s + '_elbow'], J[s + '_wrist']);
+    A[s + 'Thigh'] = angleDeg(J[s + '_hip'], J[s + '_knee']);
+    A[s + 'Shin'] = angleDeg(J[s + '_knee'], J[s + '_ankle']);
+  }
+  for (const n in A) A[n] = Math.round(nearWrap(A[n], prev ? prev[n] : fr.angles[n]) * 10) / 10;
+  fr.angles = A; fr.hip = [Math.round(hip[0] * 10) / 10, Math.round(hip[1] * 10) / 10];
+  const box = [BOX_X, GROUND], grip = S.data.pole.gripLength;
+  const wr = [J.l_wrist, J.r_wrist];
+  const top = wr.reduce((a, b) => Math.hypot(a[0] - box[0], a[1] - box[1]) >= Math.hypot(b[0] - box[0], b[1] - box[1]) ? a : b);
+  const P = fr.pole;
+  if (P.state === 'planted') {
+    const chord = Math.hypot(top[0] - box[0], top[1] - box[1]);
+    P.top = top.slice(); P.tip = box; P.bend = Math.max(0, 1 - chord / grip);
+    P.sag = grip > chord ? Math.sqrt(3 * chord * (grip - chord) / 8) : 0; P.angle = angleDeg(box, top);
+  } else if (P.state === 'carry') {
+    // keep the tip direction, move with the hand
+    const d = [P.tip[0] - P.top[0], P.tip[1] - P.top[1]];
+    P.top = top.slice(); P.tip = [top[0] + d[0], top[1] + d[1]]; P.bend = 0; P.sag = 0;
+  }
+  fr.edited = true;
+}
+
+// Fixed-bone figure from hip + angles.
+function fk(fr) {
+  const B = S.data.bones, A = fr.angles;
+  const end = (p, a, l) => [p[0] + l * Math.sin(a * Math.PI / 180), p[1] - l * Math.cos(a * Math.PI / 180)];
+  const hip = fr.hip, sho = end(hip, A.torso, B.torso), head = end(sho, A.head, B.head);
+  const segs = [['torso', hip, sho]], wrists = [];
+  for (const s of ['l', 'r']) {
+    const el = end(sho, A[s + 'UpperArm'], B.upperArm), wr = end(el, A[s + 'Forearm'], B.forearm);
+    const kn = end(hip, A[s + 'Thigh'], B.thigh), an = end(kn, A[s + 'Shin'], B.shin);
+    segs.push([s + 'UpperArm', sho, el], [s + 'Forearm', el, wr], [s + 'Thigh', hip, kn], [s + 'Shin', kn, an]);
+    wrists.push(wr);
+  }
+  return { hip, sho, head, segs, wrists };
+}
+
+function polePath(c, fr, top, tip, f, sagScale) {
+  const style = S.data.poleStyle || {};
+  const sag = (fr.pole.sag || 0) * f * (style.bendScale === undefined ? 1 : style.bendScale) * sagScale;
+  c.beginPath(); c.moveTo(tip[0], tip[1]);
+  if (fr.pole.state === 'planted' && sag > 0) {
+    const dx = top[0] - tip[0], dy = top[1] - tip[1], L = Math.hypot(dx, dy) || 1;
+    let nx = -dy / L, ny = dx / L;
+    if (nx < 0 || (Math.abs(nx) < 1e-6 && ny > 0)) { nx = -nx; ny = -ny; }
+    if (style.bendToward === 'runway') { nx = -nx; ny = -ny; }
+    c.quadraticCurveTo((top[0] + tip[0]) / 2 + nx * sag, (top[1] + tip[1]) / 2 + ny * sag, top[0], top[1]);
+  } else c.lineTo(top[0], top[1]);
+  c.stroke();
+}
+
+let view = { s: 1, ox: 0, oy: 0 };
+function computeView() {
+  const z = parseFloat(document.getElementById('zoom').value);
+  const fr = S.data.frames[S.i];
+  const pts = Object.values(fr.joints).map(toPx);
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  const W = cv.width, H = cv.height;
+  view = { s: z, ox: Math.min(Math.max(cx - W / (2 * z), 0), W - W / z), oy: Math.min(Math.max(cy - H / (2 * z), 0), H - H / z) };
+}
+function toScreen(q) { return [(q[0] - view.ox) * view.s, (q[1] - view.oy) * view.s]; }
+function toWorld(sx, sy) { return [sx / view.s + view.ox, sy / view.s + view.oy]; }
+
+function draw() {
+  if (!S.data) return;
+  const fr = S.data.frames[S.i], s = src();
+  computeView();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(view.s, 0, 0, view.s, -view.ox * view.s, -view.oy * view.s);
+  if (document.getElementById('showVideo').checked) {
+    const im = frameImage(fr.frame);
+    const source = im || (S.videoReady ? S.video : null);
+    if (source) {
+      ctx.save();
+      if (s.mirrored) { ctx.translate(s.width, 0); ctx.scale(-1, 1); }
+      ctx.drawImage(source, 0, 0, s.width, s.height);
+      ctx.restore();
+    }
+  }
+  const lw = 2 / view.s;
+  if (document.getElementById('showPole').checked && fr.pole) {
+    ctx.strokeStyle = '#ff9a2e'; ctx.lineWidth = 3 / view.s;
+    polePath(ctx, fr, toPx(fr.pole.top), toPx(fr.pole.tip), 1 / s.scale, 1);
+  }
+  if (document.getElementById('showFk').checked) {
+    const F = fk(fr);
+    ctx.strokeStyle = 'rgba(80,200,255,0.8)'; ctx.lineWidth = 3 / view.s; ctx.lineCap = 'round';
+    for (const [, a, b] of F.segs) { const A = toPx(a), B = toPx(b); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); }
+    const hd = toPx(F.head); ctx.beginPath(); ctx.arc(hd[0], hd[1], S.data.bones.head * 0.6 / s.scale, 0, Math.PI * 2); ctx.stroke();
+  }
+  // measured joints
+  ctx.lineWidth = lw; ctx.strokeStyle = '#ff3b3b';
+  for (const [a, b] of CONN) { const A = toPx(fr.joints[a]), B = toPx(fr.joints[b]); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); }
+  const hipPx = toPx(mid(fr.joints.l_hip, fr.joints.r_hip)), shoPx = toPx(mid(fr.joints.l_shoulder, fr.joints.r_shoulder));
+  ctx.strokeStyle = '#ffd23b'; ctx.beginPath(); ctx.moveTo(hipPx[0], hipPx[1]); ctx.lineTo(shoPx[0], shoPx[1]); ctx.stroke();
+  for (const n in fr.joints) {
+    const p = toPx(fr.joints[n]);
+    ctx.fillStyle = n.startsWith('l_') ? '#3bff7a' : n.startsWith('r_') ? '#ff3bd6' : '#ffffff';
+    ctx.beginPath(); ctx.arc(p[0], p[1], (S.drag === n ? 7 : 5) / view.s, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // preview
+  pctx.fillStyle = '#faf8f5'; pctx.fillRect(0, 0, 1000, 430);
+  pctx.strokeStyle = '#333'; pctx.lineWidth = 2; pctx.beginPath(); pctx.moveTo(0, GROUND); pctx.lineTo(1000, GROUND); pctx.stroke();
+  pctx.fillStyle = '#888'; pctx.fillRect(BOX_X - 40, GROUND, 40, 12);
+  pctx.strokeStyle = '#999'; for (const x of [600, 640]) { pctx.beginPath(); pctx.moveTo(x, GROUND); pctx.lineTo(x, 30); pctx.stroke(); }
+  const F = fk(fr);
+  if (fr.pole) { pctx.strokeStyle = '#c86e1e'; pctx.lineWidth = 3;
+    const top = fr.pole.state === 'released' ? fr.pole.top : F.wrists.reduce((a, b) => Math.hypot(a[0] - BOX_X, a[1] - GROUND) >= Math.hypot(b[0] - BOX_X, b[1] - GROUND) ? a : b);
+    polePath(pctx, fr, top, fr.pole.tip, 1, 1); }
+  pctx.lineCap = 'round';
+  for (const [n, a, b] of F.segs) { pctx.strokeStyle = n.startsWith('r') ? '#8a8a8a' : '#222'; pctx.lineWidth = 4; pctx.beginPath(); pctx.moveTo(a[0], a[1]); pctx.lineTo(b[0], b[1]); pctx.stroke(); }
+  pctx.beginPath(); pctx.arc(F.head[0], F.head[1], S.data.bones.head * 0.6, 0, Math.PI * 2); pctx.fillStyle = '#eee'; pctx.fill(); pctx.strokeStyle = '#222'; pctx.lineWidth = 2; pctx.stroke();
+  // labels and table
+  const key = S.data.keys.find(k => k.frame === fr.frame);
+  document.getElementById('frameLabel').innerHTML = `frame ${fr.frame} &nbsp; t=${fr.t.toFixed(2)}s` + (key ? ` &nbsp; <b>${key.name}</b>` : '') + (fr.edited ? ' &nbsp; <span class="edited">edited</span>' : '');
+  document.getElementById('scrub').value = S.i;
+  document.querySelectorAll('#keys button').forEach(b => b.classList.toggle('cur', parseInt(b.dataset.frame) === fr.frame));
+  document.getElementById('poleState').value = fr.pole ? fr.pole.state : 'planted';
+  const tb = document.getElementById('angles');
+  tb.innerHTML = '<tr><th>segment</th><th>deg</th><th>orig</th></tr>' + Object.keys(fr.angles).map(n =>
+    `<tr><td>${n}</td><td>${fr.angles[n].toFixed(0)}</td><td style="color:#999">${S.orig.frames[S.i].angles[n].toFixed(0)}</td></tr>`).join('') +
+    `<tr><td>pole bend</td><td>${fr.pole ? Math.round((fr.pole.bend || 0) * 100) + '%' : ''}</td><td></td></tr>`;
+}
+
+// Frame images: S.images maps frame number -> URL. Loaded lazily and cached.
+function frameImage(frame) {
+  if (!S.images || !(frame in S.images)) return null;
+  const c = S.imgCache[frame];
+  if (c) return c.complete && c.naturalWidth ? c : null;
+  const im = new Image(); im.onload = draw; im.src = S.images[frame]; S.imgCache[frame] = im;
+  return null;
+}
+function seekVideo() {
+  if (!S.video || !S.videoReady) { draw(); return; }
+  const fr = S.data.frames[S.i];
+  const t = (fr.frame + 0.5) / src().fps;
+  if (Math.abs(S.video.currentTime - t) < 0.002) { draw(); return; }
+  S.video.currentTime = t;
+}
+function goto(i) { S.i = Math.min(Math.max(i, 0), S.data.frames.length - 1); seekVideo(); draw(); }
+
+// dragging
+function pickJoint(wx, wy) {
+  const fr = S.data.frames[S.i]; let best = null, bd = 12 / view.s;
+  for (const n in fr.joints) { const p = toPx(fr.joints[n]); const d = Math.hypot(p[0] - wx, p[1] - wy); if (d < bd) { bd = d; best = n; } }
+  return best;
+}
+function mousePos(ev) { const r = cv.getBoundingClientRect(); return toWorld((ev.clientX - r.left) * cv.width / r.width, (ev.clientY - r.top) * cv.height / r.height); }
+cv.addEventListener('pointerdown', ev => { if (!S.data) return; const [x, y] = mousePos(ev); S.drag = pickJoint(x, y); if (S.drag) cv.setPointerCapture(ev.pointerId); draw(); });
+cv.addEventListener('pointermove', ev => { if (!S.drag) return; const [x, y] = mousePos(ev); S.data.frames[S.i].joints[S.drag] = fromPx([x, y]).map(v => Math.round(v * 10) / 10); recompute(S.i); draw(); });
+cv.addEventListener('pointerup', () => { S.drag = null; draw(); });
+
+// loading
+function loadData(obj) {
+  S.data = obj; S.orig = JSON.parse(JSON.stringify(obj)); S.i = 0;
+  if (!S.data.poleStyle) S.data.poleStyle = { bendToward: 'pit', bendScale: 1 };
+  document.getElementById('bendToward').value = S.data.poleStyle.bendToward || 'pit';
+  document.getElementById('bendScale').value = S.data.poleStyle.bendScale === undefined ? 1 : S.data.poleStyle.bendScale;
+  document.getElementById('grip').value = S.data.pole.gripLength;
+  document.getElementById('scrub').max = S.data.frames.length - 1;
+  cv.width = obj.source.width; cv.height = obj.source.height;
+  buildKeys();
+  const sel = document.getElementById('assignKey'); sel.innerHTML = '<option value="">(choose)</option>' + KEY_NAMES.map(n => `<option>${n}</option>`).join('');
+  goto(S.data.keys[0] ? S.data.frames.findIndex(f => f.frame === S.data.keys[0].frame) : 0);
+}
+function buildKeys() {
+  const host = document.getElementById('keys'); host.innerHTML = '';
+  S.data.keys.forEach((k, n) => { const b = document.createElement('button'); b.textContent = `${n + 1} ${k.name} (${k.frame})`; b.dataset.frame = k.frame;
+    b.onclick = () => goto(S.data.frames.findIndex(f => f.frame === k.frame)); host.append(b); });
+}
+document.getElementById('jsonFile').addEventListener('change', ev => { const f = ev.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => loadData(JSON.parse(r.result)); r.readAsText(f); });
+function attachVideo(url) {
+  const v = document.createElement('video'); v.src = url; v.muted = true; v.preload = 'auto';
+  v.addEventListener('loadeddata', () => { S.videoReady = true; seekVideo(); });
+  v.addEventListener('seeked', draw);
+  S.video = v; S.videoReady = false;
+}
+document.getElementById('videoFile').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) attachVideo(URL.createObjectURL(f)); });
+document.getElementById('framesFile').addEventListener('change', ev => {
+  // file names must end in the frame number, e.g. f_0034.jpg
+  S.images = {}; S.imgCache = {};
+  for (const f of ev.target.files) { const m = f.name.match(/(\d+)\.[a-z]+$/i); if (m) S.images[parseInt(m[1])] = URL.createObjectURL(f); }
+  draw();
+});
+
+// controls
+document.getElementById('prev').onclick = () => goto(S.i - 1);
+document.getElementById('next').onclick = () => goto(S.i + 1);
+document.getElementById('scrub').oninput = ev => goto(parseInt(ev.target.value));
+document.getElementById('zoom').onchange = draw;
+for (const id of ['showVideo', 'showFk', 'showPole']) document.getElementById(id).onchange = draw;
+document.getElementById('reset').onclick = () => { S.data.frames[S.i] = JSON.parse(JSON.stringify(S.orig.frames[S.i])); draw(); };
+document.getElementById('copyPrev').onclick = () => { if (S.i > 0) { const p = S.data.frames[S.i - 1]; const f = S.data.frames[S.i]; f.joints = JSON.parse(JSON.stringify(p.joints)); recompute(S.i); draw(); } };
+document.getElementById('assignKey').onchange = ev => { const n = ev.target.value; if (!n) return; const k = S.data.keys.find(k => k.name === n); if (k) k.frame = S.data.frames[S.i].frame; buildKeys(); draw(); ev.target.value = ''; };
+document.getElementById('bendToward').onchange = ev => { S.data.poleStyle.bendToward = ev.target.value; draw(); };
+document.getElementById('bendScale').onchange = ev => { S.data.poleStyle.bendScale = parseFloat(ev.target.value) || 1; draw(); };
+document.getElementById('grip').onchange = ev => { S.data.pole.gripLength = parseFloat(ev.target.value); S.data.frames.forEach((f, k) => { if (f.pole && f.pole.state === 'planted') recompute(k); }); draw(); };
+document.getElementById('poleState').onchange = ev => { const f = S.data.frames[S.i]; if (f.pole) { f.pole.state = ev.target.value; recompute(S.i); draw(); } };
+function download(obj, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj)], { type: 'application/json' })); a.download = name; a.click(); }
+document.getElementById('save').onclick = () => download(S.data, (S.data.name || 'vault') + '.json');
+document.getElementById('saveKeys').onclick = () => {
+  const byFrame = {}; S.data.frames.forEach(f => byFrame[f.frame] = f);
+  download({ name: S.data.name, bones: S.data.bones, poleStyle: S.data.poleStyle, canvas: S.data.canvas, angleConvention: S.data.angleConvention,
+    positions: S.data.keys.map(k => Object.assign({ name: k.name }, byFrame[k.frame])) }, (S.data.name || 'vault') + '_keys.json');
+};
+window.addEventListener('keydown', ev => {
+  if (!S.data || ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+  if (ev.key === 'ArrowRight') goto(S.i + 1); if (ev.key === 'ArrowLeft') goto(S.i - 1);
+  if (ev.key >= '1' && ev.key <= '9') { const k = S.data.keys[parseInt(ev.key) - 1]; if (k) goto(S.data.frames.findIndex(f => f.frame === k.frame)); }
+});
+
+// Served over http: auto-load the sample data and video from the repo.
+const params = new URLSearchParams(location.search);
+const name = params.get('vault') || 'vault_2018-05-24';
+fetch('data/' + name + '.json').then(r => r.ok ? r.json() : null).then(d => {
+  if (!d) return; loadData(d);
+  const dir = 'data/frames/' + name + '/';
+  fetch(dir + 'f_0000.jpg', { method: 'HEAD' }).then(r => {
+    if (r.ok) { S.images = {}; d.frames.forEach(f => S.images[f.frame] = dir + 'f_' + String(f.frame).padStart(4, '0') + '.jpg'); draw(); }
+    else return fetch(d.source.video, { method: 'HEAD' }).then(r => { if (r.ok) attachVideo(d.source.video); });
+  }).catch(() => {});
+}).catch(() => {});
+</script>
+</body>
+</html>
