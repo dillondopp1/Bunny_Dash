@@ -146,15 +146,21 @@ def fit_data(data, margin=10):
     return out, f
 
 
-def render_frame(data, fr, label=None):
+def render_frame(data, fr, label=None, trail=None, big_label=False):
     img = np.zeros((H, W, 3), np.uint8)
     draw_scene(img, data["canvas"].get("barY") or 120)
+    if trail is not None and len(trail) > 1:
+        pts = np.array([[int(round(x)), int(round(y))] for x, y in trail])
+        cv2.polylines(img, [pts], False, (215, 190, 160), 1, cv2.LINE_AA)
     draw_pole(img, fr, data["bones"])
     draw_figure(img, fr, data["bones"])
     txt = f"frame {fr['frame']}  t={fr['t']:.2f}s"
-    if label:
-        txt = f"{label}   " + txt
     cv2.putText(img, txt, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, INK, 1, cv2.LINE_AA)
+    if label:
+        if big_label:
+            cv2.putText(img, label, (12, H - 18), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (200, 110, 30), 2, cv2.LINE_AA)
+        else:
+            cv2.putText(img, label, (12, H - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.7, INK, 1, cv2.LINE_AA)
     return img
 
 
@@ -173,6 +179,8 @@ def main():
     ap.add_argument("--keys", default=None, help="write a PNG sequence of the key positions here")
     ap.add_argument("--slow", type=float, default=1.0, help="playback slowdown factor")
     ap.add_argument("--no-fit", action="store_true", help="do not shrink the scene to fit the canvas")
+    ap.add_argument("--hold", type=int, default=0, help="repeat each key position this many extra frames with its label")
+    ap.add_argument("--trail", action="store_true", help="draw the hip path")
     args = ap.parse_args()
 
     data = json.load(open(args.json))
@@ -197,15 +205,22 @@ def main():
     os.makedirs(tmpdir, exist_ok=True)
     for f in os.listdir(tmpdir):
         os.remove(os.path.join(tmpdir, f))
+    n_out = 0
+    trail = []
     for k, fr in enumerate(data["frames"]):
-        img = render_frame(data, fr, key_by_frame.get(fr["frame"]))
-        if src is not None and fr["frame"] < len(src):
-            v = src[fr["frame"]]
-            if data["source"]["mirrored"]:
-                v = v[:, ::-1]
-            v = cv2.resize(v, (W, int(v.shape[0] * W / v.shape[1])))
-            img = np.vstack([v, img])
-        cv2.imwrite(os.path.join(tmpdir, f"f_{k:04d}.png"), img)
+        trail.append(fr["hip"])
+        name = key_by_frame.get(fr["frame"])
+        repeats = 1 + (args.hold if name else 0)
+        for r in range(repeats):
+            img = render_frame(data, fr, name, trail if args.trail else None, big_label=bool(name))
+            if src is not None and fr["frame"] < len(src):
+                v = src[fr["frame"]]
+                if data["source"]["mirrored"]:
+                    v = v[:, ::-1]
+                v = cv2.resize(v, (W, int(v.shape[0] * W / v.shape[1])))
+                img = np.vstack([v, img])
+            cv2.imwrite(os.path.join(tmpdir, f"f_{n_out:04d}.png"), img)
+            n_out += 1
 
     ff = ffmpeg()
     subprocess.run([ff, "-y", "-loglevel", "error", "-framerate", str(fps),
