@@ -10,7 +10,12 @@
   header h1 { font-size:16px; margin:0 8px 0 0; }
   main { padding:10px 16px; max-width:1300px; margin:0 auto; display:grid; grid-template-columns: 1fr 330px; gap:12px; }
   @media (max-width:1000px) { main { grid-template-columns:1fr; } }
-  canvas { background:#111; display:block; max-width:100%; border:1px solid #ccc; }
+  canvas { background:#111; display:block; max-width:100%; border:1px solid #ccc; touch-action:none; }
+  @media (max-width:1000px) {
+    header { position:sticky; top:0; z-index:5; }
+    #keys button, .row button { padding:8px 12px; }
+    #guideNav button { flex:1 1 auto; }
+  }
   #preview { background:#faf8f5; }
   button, select, input { font:inherit; }
   button { padding:4px 10px; border:1px solid #bbb; background:#f7f7f7; border-radius:4px; cursor:pointer; }
@@ -75,7 +80,7 @@
     <div class="startCard" id="startCard">
       <div id="drop">
         <b>Drop a vault video here</b><br>
-        <span class="hint">or click to choose one. Side on, athlete large in frame. It stays on this computer.</span>
+        <span class="hint">or click to choose one. Side on, athlete large in frame. It never leaves your own network.</span>
       </div>
       <div id="prog">
         <div id="progOuter"><div id="progInner"></div></div>
@@ -159,7 +164,8 @@ const CONN = [['l_shoulder','l_elbow'],['l_elbow','l_wrist'],['r_shoulder','r_el
   ['r_hip','r_knee'],['r_knee','r_ankle'],['r_ankle','r_heel'],['r_ankle','r_foot'],
   ['l_shoulder','r_shoulder'],['l_hip','r_hip'],['l_ear','r_ear']];
 const KEY_NAMES = ['Run','Plant','Takeoff','Swing','Rockback','Extension','Turn + clear','Fly away','Land'];
-const S = { data:null, orig:null, i:0, video:null, videoReady:false, drag:null, images:null, imgCache:{} };
+const S = { data:null, orig:null, i:0, video:null, videoReady:false, drag:null, images:null, imgCache:{},
+            coarse: window.matchMedia && window.matchMedia('(pointer: coarse)').matches };
 
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const pv = document.getElementById('preview'), pctx = pv.getContext('2d');
@@ -286,7 +292,8 @@ function draw() {
   for (const n in fr.joints) {
     const p = toPx(fr.joints[n]);
     ctx.fillStyle = n.startsWith('l_') ? '#3bff7a' : n.startsWith('r_') ? '#ff3bd6' : '#ffffff';
-    ctx.beginPath(); ctx.arc(p[0], p[1], (S.drag === n ? 7 : 5) / view.s, 0, Math.PI * 2); ctx.fill();
+    const rr = (S.drag === n ? 9 : (S.coarse ? 7 : 5)) / view.s;
+    ctx.beginPath(); ctx.arc(p[0], p[1], rr, 0, Math.PI * 2); ctx.fill();
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   // preview
@@ -338,7 +345,9 @@ function syncGuideHighlight() {
 
 // dragging
 function pickJoint(wx, wy) {
-  const fr = S.data.frames[S.i]; let best = null, bd = 12 / view.s;
+  // A fingertip is a much blunter pointer than a mouse, so allow a wider grab.
+  const fr = S.data.frames[S.i];
+  let best = null, bd = (S.coarse ? 30 : 12) / view.s;
   for (const n in fr.joints) { const p = toPx(fr.joints[n]); const d = Math.hypot(p[0] - wx, p[1] - wy); if (d < bd) { bd = d; best = n; } }
   return best;
 }
@@ -354,7 +363,7 @@ cv.addEventListener('pointerdown', ev => {
   }
   S.drag = pickJoint(x, y); if (S.drag) cv.setPointerCapture(ev.pointerId); draw();
 });
-cv.addEventListener('pointermove', ev => { if (!S.drag) return; const [x, y] = mousePos(ev); S.data.frames[S.i].joints[S.drag] = fromPx([x, y]).map(v => Math.round(v * 10) / 10); recompute(S.i); draw(); });
+cv.addEventListener('pointermove', ev => { if (!S.drag) return; ev.preventDefault(); const [x, y] = mousePos(ev); S.data.frames[S.i].joints[S.drag] = fromPx([x, y]).map(v => Math.round(v * 10) / 10); recompute(S.i); draw(); });
 cv.addEventListener('pointerup', () => { S.drag = null; draw(); });
 
 // loading
@@ -546,6 +555,13 @@ document.getElementById('guideLooksRight').onclick = () => {
 // the header remain the way in.
 // ---------------------------------------------------------------------------
 let hasServer = false;
+// When the app is served to other devices it requires a key, carried in the
+// page URL. Everything the page fetches has to pass it along.
+const KEY = new URLSearchParams(location.search).get('k') || '';
+function keyed(url) {
+  if (!KEY) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(KEY);
+}
 function setProgress(pct, text, isError) {
   document.getElementById('prog').style.display = 'block';
   document.getElementById('progInner').style.width = Math.max(0, Math.min(100, pct)) + '%';
@@ -554,10 +570,10 @@ function setProgress(pct, text, isError) {
 }
 function uploadVideo(file) {
   if (!file) return;
-  if (!hasServer) { alert('Video processing needs the app server. Start it with:\n\npython tools/vault_app.py'); return; }
+  if (!hasServer) { alert('Video processing needs the app running on a computer. Start it there with:\n\npython tools/vault_app.py --lan\n\nthen open the link it prints.'); return; }
   document.getElementById('drop').style.display = 'none';
   setProgress(2, 'Uploading ' + file.name + '…');
-  fetch('/api/upload?filename=' + encodeURIComponent(file.name), { method: 'POST', body: file })
+  fetch(keyed('/api/upload?filename=' + encodeURIComponent(file.name)), { method: 'POST', body: file })
     .then(r => r.json())
     .then(res => {
       if (res.error) throw new Error(res.error);
@@ -566,7 +582,7 @@ function uploadVideo(file) {
     .catch(e => { setProgress(100, 'Upload failed: ' + e.message, true); document.getElementById('drop').style.display = ''; });
 }
 function pollJob(id) {
-  fetch('/api/job?id=' + id).then(r => r.json()).then(j => {
+  fetch(keyed('/api/job?id=' + id)).then(r => r.json()).then(j => {
     if (j.error) {
       setProgress(100, 'Processing failed: ' + j.error, true);
       document.getElementById('drop').style.display = '';
@@ -585,17 +601,17 @@ function pollJob(id) {
   }).catch(() => setTimeout(() => pollJob(id), 1500));
 }
 function openVault(name) {
-  return fetch('data/' + name + '.json').then(r => r.json()).then(d => {
+  return fetch(keyed('data/' + name + '.json')).then(r => r.json()).then(d => {
     loadData(d);
     const dir = 'data/frames/' + name + '/';
     S.images = {}; S.imgCache = {};
-    d.frames.forEach(f => S.images[f.frame] = dir + 'f_' + String(f.frame).padStart(4, '0') + '.jpg');
+    d.frames.forEach(f => S.images[f.frame] = keyed(dir + 'f_' + String(f.frame).padStart(4, '0') + '.jpg'));
     draw();
     document.getElementById('vaultPick').value = name;
   });
 }
 function refreshVaults() {
-  return fetch('/api/vaults').then(r => r.json()).then(v => {
+  return fetch(keyed('/api/vaults')).then(r => r.json()).then(v => {
     hasServer = true;
     const sel = document.getElementById('vaultPick');
     const cur = sel.value;

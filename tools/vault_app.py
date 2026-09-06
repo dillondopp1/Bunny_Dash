@@ -13,6 +13,8 @@ from the dropdown at the top of the page.
 """
 import argparse
 import http.server
+import secrets
+import socket
 import json
 import os
 import re
@@ -35,6 +37,23 @@ MAX_UPLOAD = 600 * 1024 * 1024
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+# Set when serving beyond this machine; then /api/ and /data/ need ?k=TOKEN.
+TOKEN = ""
+
+
+def lan_ip():
+    """Best guess at this machine's address on the local network."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))       # no packets are sent, just picks a route
+        return s.getsockname()[0]
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "127.0.0.1"
+    finally:
+        s.close()
 
 
 def slugify(name):
@@ -130,6 +149,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if "/api/" in (self.path or ""):
             sys.stderr.write("  %s\n" % (fmt % args))
 
+    def _authorised(self, parts):
+        if not TOKEN:
+            return True
+        if not (parts.path.startswith("/api/") or parts.path.startswith("/data/")):
+            return True
+        given = urllib.parse.parse_qs(parts.query).get("k", [""])[0]
+        return secrets.compare_digest(given, TOKEN)
+
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
         self.send_response(code)
@@ -141,6 +168,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parts = urllib.parse.urlsplit(self.path)
+        if not self._authorised(parts):
+            return self._json({"error": "bad or missing key"}, 403)
         q = urllib.parse.parse_qs(parts.query)
         if parts.path == "/api/job":
             return self._json(get_job(q.get("id", [""])[0]))
@@ -155,13 +184,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._json({"vaults": [n for _, n in found]})
         if parts.path == "/":
             self.send_response(302)
-            self.send_header("Location", "/pose-editor.html")
+            self.send_header("Location", "/pose-editor.html" + (f"?k={TOKEN}" if TOKEN else ""))
             self.end_headers()
             return
+        self.path = parts.path          # the static handler chokes on ?k=...
         return super().do_GET()
 
     def do_POST(self):
         parts = urllib.parse.urlsplit(self.path)
+        if not self._authorised(parts):
+            return self._json({"error": "bad or missing key"}, 403)
         if parts.path != "/api/upload":
             return self._json({"error": "unknown endpoint"}, 404)
         q = urllib.parse.parse_qs(parts.query)
@@ -203,14 +235,30 @@ class Server(socketserver.ThreadingTCPServer):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default=None,
+                    help="address to bind (default 127.0.0.1, or 0.0.0.0 with --lan)")
+    ap.add_argument("--lan", action="store_true",
+                    help="also serve to phones and tablets on the same wifi")
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
+    global TOKEN
+    host = args.host or ("0.0.0.0" if args.lan else "127.0.0.1")
+    open_to_network = args.lan or host not in ("127.0.0.1", "localhost")
+    if open_to_network:
+        TOKEN = secrets.token_urlsafe(9)
     for d in (DATA, UPLOADS, FRAMES):
         os.makedirs(d, exist_ok=True)
-    url = f"http://{args.host}:{args.port}/pose-editor.html"
-    srv = Server((args.host, args.port), Handler)
+    suffix = f"?k={TOKEN}" if TOKEN else ""
+    url = f"http://127.0.0.1:{args.port}/pose-editor.html{suffix}"
+    srv = Server((host, args.port), Handler)
     print(f"Pole vault editor running at {url}")
+    if open_to_network:
+        print()
+        print("On your phone, on the same wifi, open:")
+        print(f"    http://{lan_ip()}:{args.port}/pose-editor.html{suffix}")
+        print()
+        print("The key in that link is what keeps other people on the network out,")
+        print("so treat the link as private. Restarting issues a new key.")
     print("Drop a video on the page to start. Ctrl+C here to stop.")
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

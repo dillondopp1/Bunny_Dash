@@ -19,6 +19,34 @@ Everything runs on your own machine; nothing is uploaded anywhere.
 Processed clips are listed in the dropdown at the top of the page, so you can
 come back to one later. Add `?vault=name` to the URL to open a specific one.
 
+## Using it from a phone or tablet
+
+Pose detection needs Python and mediapipe, so it runs on a computer, not on
+the phone. The page itself is plain HTML and works fine on a phone, so run the
+app on a laptop and open it from the phone over the same wifi:
+
+```
+python tools/vault_app.py --lan
+```
+
+It prints a link with your computer's network address and an access key. Open
+that link on the phone. You can film a vault, upload it straight from the
+phone's camera roll through the drop zone, watch it process, and drag joints
+with your finger. The uploaded clip and the results stay on the computer
+running the app.
+
+The key in the link is what stops anyone else on the wifi reaching your clips,
+so treat the link as private, especially on a shared network at a meet or a
+school. A new key is issued each time the app starts. Without `--lan` the app
+only listens on the computer itself and needs no key.
+
+On the phone the layout stacks into one column, joints get a larger touch
+target, and dragging does not scroll the page. Zoom to 3x or 4x for fiddly
+frames. Running the detection on the phone itself is not supported: there are
+64-bit ARM Linux builds of mediapipe, so a full Linux environment on Android
+(Termux with proot-distro, not plain Termux, which is not glibc) could run it,
+but it is slow and awkward and the wifi route is better.
+
 The one thing the app cannot work out for itself is the plant box: no pose
 model detects a pole, so it estimates the box from the line through both hands
 and then asks you to click the exact spot. That estimate can be off by a foot
