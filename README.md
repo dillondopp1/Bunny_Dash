@@ -3,7 +3,30 @@
 Tools for turning a side-on pole vault clip into a stick figure animation and
 a JSON of per-frame joint angles that plays in `pole-vault-positions.html`.
 
+## Getting it onto your computer
+
+1. Download the code. On the repository page on GitHub, switch to the branch
+   `claude/pole-vault-video-poses-9w1939`, press the green **Code** button and
+   choose **Download ZIP**. Unzip it somewhere you can find again, such as your
+   Desktop.
+2. Open the unzipped folder and double-click **start-here-mac.command** on a
+   Mac, or **start-here-windows.bat** on Windows.
+3. The first run installs what it needs, which takes a few minutes and only
+   happens once. After that it asks whether you want the editor on this
+   computer only, or on your phone as well, then opens the page in your
+   browser.
+
+If Python is missing, the launcher says so and points you at
+[python.org/downloads](https://www.python.org/downloads/). On Windows, tick
+"Add python.exe to PATH" in the installer. On a Mac the first double-click may
+be blocked because the file came from the internet: right-click the file,
+choose **Open**, then **Open** again.
+
+To stop it, close the black terminal window it opened, or press Ctrl+C there.
+
 ## Quick start: drop in a video
+
+Already set up, or comfortable in a terminal:
 
 ```
 pip install -r requirements.txt
