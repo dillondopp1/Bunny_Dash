@@ -378,10 +378,12 @@ function buildVault(det, meta, name) {
     let head = [(J.l_ear[0] + J.r_ear[0]) / 2, (J.l_ear[1] + J.r_ear[1]) / 2];
     if (!Number.isFinite(head[0])) head = J.nose;
     torsoS.push(angleDeg(hip, sho)); headS.push(angleDeg(sho, head));
+    // Arms hang off the shoulder midpoint and legs off the hip midpoint, which
+    // is where the stick figure draws them from, so measure from there.
     for (const s of ['l', 'r']) {
-      segS[s + 'UpperArm'].push(angleDeg(J[s + '_shoulder'], J[s + '_elbow']));
+      segS[s + 'UpperArm'].push(angleDeg(sho, J[s + '_elbow']));
       segS[s + 'Forearm'].push(angleDeg(J[s + '_elbow'], J[s + '_wrist']));
-      segS[s + 'Thigh'].push(angleDeg(J[s + '_hip'], J[s + '_knee']));
+      segS[s + 'Thigh'].push(angleDeg(hip, J[s + '_knee']));
       segS[s + 'Shin'].push(angleDeg(J[s + '_knee'], J[s + '_ankle']));
     }
     hipsC.push(hip); handsC.push([J.l_wrist, J.r_wrist]);

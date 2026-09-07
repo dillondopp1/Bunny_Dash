@@ -236,10 +236,12 @@ def main():
             head_c = J["nose"]
         torso_series.append(angle_deg(hip_c, sho_c))
         head_series.append(angle_deg(sho_c, head_c))
+        # Arms hang off the shoulder midpoint and legs off the hip midpoint,
+        # which is where the stick figure draws them from, so measure from there.
         for side, key in (("l", "l"), ("r", "r")):
-            seg_series[f"{key}UpperArm"].append(angle_deg(J[f"{side}_shoulder"], J[f"{side}_elbow"]))
+            seg_series[f"{key}UpperArm"].append(angle_deg(sho_c, J[f"{side}_elbow"]))
             seg_series[f"{key}Forearm"].append(angle_deg(J[f"{side}_elbow"], J[f"{side}_wrist"]))
-            seg_series[f"{key}Thigh"].append(angle_deg(J[f"{side}_hip"], J[f"{side}_knee"]))
+            seg_series[f"{key}Thigh"].append(angle_deg(hip_c, J[f"{side}_knee"]))
             seg_series[f"{key}Shin"].append(angle_deg(J[f"{side}_knee"], J[f"{side}_ankle"]))
         hips_c.append(hip_c)
         hands_c.append((J["l_wrist"], J["r_wrist"]))

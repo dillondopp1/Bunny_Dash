@@ -1,7 +1,56 @@
-# Pole vault stick figures from video
+# Pole vault stick figures
 
-Tools for turning a side-on pole vault clip into a stick figure animation and
-a JSON of per-frame joint angles that plays in `pole-vault-positions.html`.
+Trace the positions of a vault from your own video and get a stick figure
+animation, plus the joint angles as JSON.
+
+## The tool: pole-vault-tracer.html
+
+**Double-click `pole-vault-tracer.html`.** That is the whole setup. It is one
+HTML file with nothing else attached: no install, no server, no internet. It
+works the same on a laptop or an Android phone, and the video never leaves the
+device.
+
+How it goes:
+
+1. **Drop in a video.** Filmed side on. It is read straight off the disk.
+2. **Mark the plant box** once, by clicking where the pole goes into it. The
+   pole is drawn from the top hand down to that spot.
+3. **Step to a frame you care about** and click to drop the joints: head, neck,
+   hips, elbows, hands, knees, feet. The panel on the right shows which are
+   placed and highlights the next one. Drag any dot to adjust it. Backspace
+   undoes the last one.
+4. **Press "Save as position"** and name it: Run, Plant, Takeoff, Swing,
+   Rockback, Extension, Turn + clear, Fly away, Land. The name box then moves
+   to the next one for you.
+5. Move to the next frame. The joints carry over from the frame before, so you
+   nudge what moved rather than placing eleven points again.
+6. **Press Play.** The panel on the right runs a smooth pass through the
+   positions you saved, on the standard scene with the box, standards and mat.
+
+Two save buttons:
+
+- **Save work** keeps everything, including every traced frame, so you can come
+  back and carry on. Open it again with "Open saved work" plus the same video.
+- **Export positions** writes the nine positions as JSON: hip position, all ten
+  segment angles, and the pole. This is the drill-library format, and what
+  `pole-vault-positions.html` and `tools/render_stick.py` read.
+
+Angles are in degrees, 0 straight up, 90 forward toward the pit, 180 down, and
+run continuously across positions so a swing through the inverted phase reads
+as a rotation rather than flipping sign. Bone lengths are fixed (torso 44,
+head 16, upper arm 24, forearm 24, thigh 32, shin 32), so the traced pose is
+turned into angles and redrawn at those lengths. That is why the figure on the
+right will not sit exactly on the video when a limb points at the camera.
+
+Tick **Flip left/right** if the athlete runs right to left, so the pit ends up
+on the right like the scene expects.
+
+## Automatic detection, if you ever want it
+
+Everything below is the older route, which finds the joints for you with pose
+detection instead of you placing them. It still works and is still here, but it
+needs either Python or a WebAssembly runtime, and the tracer above is the
+simpler tool. Skip it unless tracing by hand turns out to be too slow.
 
 ## How the detection can run
 

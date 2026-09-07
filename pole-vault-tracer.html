@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pole Vault Tracer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --ink:#1e1e1e; --muted:#6b6b6b; --line:#dcdcdc; --accent:#1e6ec8; --warm:#c86e1e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; color:var(--ink); background:#ececeb; }
+  header { padding:10px 16px; background:#fff; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 6px 0 0; }
+  main { max-width:1320px; margin:0 auto; padding:12px 16px 40px; display:grid; grid-template-columns:1fr 340px; gap:14px; align-items:start; }
+  @media (max-width:1040px) { main { grid-template-columns:1fr; } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; }
+  canvas { display:block; width:100%; border-radius:6px; touch-action:none; }
+  #trace { background:#111; cursor:crosshair; }
+  #stage { background:#faf8f5; border:1px solid var(--line); }
+  button, select, input { font:inherit; }
+  button { padding:6px 11px; border:1px solid #c2c2c2; background:#f7f7f7; border-radius:5px; cursor:pointer; }
+  button:hover { background:#efefef; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.warm { background:var(--warm); border-color:var(--warm); color:#fff; }
+  button:disabled { opacity:.45; cursor:default; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  .grow { flex:1; }
+  h2 { font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:14px 0 6px; }
+  h2:first-child { margin-top:0; }
+  .hint { color:var(--muted); font-size:12.5px; }
+  #jointList { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+  .jbtn { display:flex; align-items:center; gap:6px; padding:4px 7px; border:1px solid var(--line); border-radius:5px; background:#fafafa; cursor:pointer; font-size:12.5px; }
+  .jbtn .dot { width:9px; height:9px; border-radius:50%; background:#ccc; flex:none; }
+  .jbtn.set .dot { background:#00b368; }
+  .jbtn.next { border-color:var(--accent); background:#eaf2fd; font-weight:600; }
+  #keyList { display:flex; flex-direction:column; gap:4px; max-height:230px; overflow:auto; }
+  .keyrow { display:flex; gap:6px; align-items:center; padding:3px 6px; border:1px solid var(--line); border-radius:5px; font-size:12.5px; }
+  .keyrow.cur { border-color:var(--warm); background:#fff6ec; }
+  .keyrow .nm { flex:1; }
+  .keyrow button { padding:1px 6px; font-size:12px; }
+  #drop { border:2px dashed #b8c8db; border-radius:8px; background:#f6fafd; padding:26px; text-align:center; cursor:pointer; }
+  #drop.over { border-color:var(--accent); background:#e9f2fc; }
+  .banner { background:#fff8e8; border:1px solid #e5c78d; border-left:4px solid var(--warm); border-radius:6px; padding:9px 12px; margin-bottom:10px; }
+  .banner.hide { display:none; }
+  kbd { background:#f1f1f1; border:1px solid #d4d4d4; border-bottom-width:2px; border-radius:4px; padding:0 5px; font:12px ui-monospace, monospace; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  td, th { padding:2px 5px; border-bottom:1px solid #f0f0f0; text-align:right; }
+  td:first-child, th:first-child { text-align:left; color:var(--muted); font-weight:400; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Pole vault tracer</h1>
+  <button id="pickVideo">Open video</button>
+  <button id="loadProj">Open saved work</button>
+  <button id="saveProj">Save work</button>
+  <span class="grow"></span>
+  <button id="exportKeys" class="primary">Export positions</button>
+</header>
+
+<main>
+  <div>
+    <div id="startCard" class="card">
+      <div id="drop">
+        <b style="font-size:16px">Drop a vault video here</b><br>
+        <span class="hint">or click to choose one. Filmed side on. Nothing is uploaded, it all happens on this device.</span>
+      </div>
+    </div>
+
+    <div id="workArea" style="display:none">
+      <div id="boxBanner" class="banner hide">
+        <b>Mark the plant box.</b> Click the spot where the pole goes into the box, so the pole can be drawn to it.
+        <div class="row" style="margin-bottom:0">
+          <button id="setBox" class="warm">Click the box</button>
+          <button id="skipBox">Skip for now</button>
+          <span class="hint" id="boxState"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <canvas id="trace" width="1280" height="720"></canvas>
+        <div class="row">
+          <button id="prevF">&#9664;</button>
+          <button id="nextF">&#9654;</button>
+          <input type="range" id="scrub" class="grow" min="0" max="0" value="0">
+          <span id="frameLabel" class="hint"></span>
+        </div>
+        <div class="row">
+          <label>Zoom <select id="zoom"><option value="1">Fit</option><option value="2">2x</option><option value="3">3x</option><option value="4">4x</option></select></label>
+          <label><input type="checkbox" id="showVideo" checked> Video</label>
+          <label>fps <input type="number" id="fps" value="30" min="1" max="240" style="width:60px"></label>
+          <label><input type="checkbox" id="flip"> Flip left/right</label>
+          <button id="clearFrame">Clear this frame</button>
+        </div>
+        <div class="row">
+          <button id="markKey" class="warm">Save as position</button>
+          <select id="keyName"></select>
+          <span class="hint">Place the joints, then save the frame as one of the nine positions.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Result</h2>
+      <canvas id="stage" width="1000" height="430"></canvas>
+      <div class="row">
+        <button id="play" class="primary">Play</button>
+        <input type="range" id="playScrub" class="grow" min="0" max="1000" value="0">
+        <label>Speed <select id="speed"><option value="0.35">Slow</option><option value="0.6" selected>Medium</option><option value="1">Real time</option></select></label>
+      </div>
+      <p class="hint" id="playHint">Save at least two positions to see the vault play.</p>
+
+      <h2>Joints on this frame</h2>
+      <div id="jointList"></div>
+      <p class="hint">Click the frame to drop the highlighted joint. Drag any dot to move it.
+      <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step frames, <kbd>Backspace</kbd> undoes the last joint.</p>
+
+      <h2>Pole</h2>
+      <div class="row">
+        <label>Bend <input type="range" id="bend" min="0" max="60" value="22" style="width:120px"></label>
+        <span class="hint" id="bendVal">22%</span>
+      </div>
+
+      <h2>Saved positions</h2>
+      <div id="keyList"></div>
+
+      <h2>Angles here</h2>
+      <table id="angleTable"></table>
+    </div>
+  </div>
+</main>
+
+<script>
+// ===========================================================================
+// A tracing tool: you place the joints on a video frame, it turns them into
+// the angles the animation needs. No pose detection, nothing to install.
+// ===========================================================================
+
+// Scene, matching pole-vault-positions.html
+const W = 1000, H = 430, GROUND = 340, BOX_X = 560;
+const BONES = { torso: 44, head: 16, upperArm: 24, forearm: 24, thigh: 32, shin: 32 };
+const KEY_NAMES = ['Run', 'Plant', 'Takeoff', 'Swing', 'Rockback', 'Extension', 'Turn + clear', 'Fly away', 'Land'];
+const FIG = '#00ff88';
+
+// The joints you place, in the order the tool asks for them.
+const JOINTS = [
+  { id: 'head',    label: 'Head' },
+  { id: 'neck',    label: 'Neck' },
+  { id: 'pelvis',  label: 'Hips' },
+  { id: 'lelbow',  label: 'Elbow (near)' },
+  { id: 'lhand',   label: 'Hand (near)' },
+  { id: 'relbow',  label: 'Elbow (far)' },
+  { id: 'rhand',   label: 'Hand (far)' },
+  { id: 'lknee',   label: 'Knee (near)' },
+  { id: 'lfoot',   label: 'Foot (near)' },
+  { id: 'rknee',   label: 'Knee (far)' },
+  { id: 'rfoot',   label: 'Foot (far)' },
+];
+// How the stick figure is wired together.
+const LIMBS = [
+  ['pelvis', 'neck'], ['neck', 'head'],
+  ['neck', 'lelbow'], ['lelbow', 'lhand'],
+  ['neck', 'relbow'], ['relbow', 'rhand'],
+  ['pelvis', 'lknee'], ['lknee', 'lfoot'],
+  ['pelvis', 'rknee'], ['rknee', 'rfoot'],
+];
+
+const S = {
+  video: null, url: null, name: '', fps: 30, nFrames: 0, i: 0,
+  vw: 0, vh: 0,
+  poses: {},          // frame -> { head:[x,y], ... } in video pixels
+  keys: [],           // [{ frame, name }]
+  boxPx: null,        // plant box in video pixels
+  bend: 0.22,
+  flip: false,
+  drag: null, picking: false, playing: false, t: 0,
+  coarse: window.matchMedia && window.matchMedia('(pointer: coarse)').matches,
+};
+
+const $ = id => document.getElementById(id);
+const cv = $('trace'), ctx = cv.getContext('2d');
+const stage = $('stage'), sctx = stage.getContext('2d');
+const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+const round1 = v => Math.round(v * 10) / 10;
+
+// --------------------------------------------------------------------------
+// Video
+// --------------------------------------------------------------------------
+function openVideo(file) {
+  if (S.url) URL.revokeObjectURL(S.url);
+  S.url = URL.createObjectURL(file);
+  S.name = (file.name || 'vault').replace(/\.[^.]+$/, '');
+  const v = document.createElement('video');
+  v.preload = 'auto'; v.muted = true; v.playsInline = true; v.src = S.url;
+  v.onloadedmetadata = () => {
+    S.video = v; S.vw = v.videoWidth; S.vh = v.videoHeight;
+    S.fps = parseInt($('fps').value) || 30;
+    S.nFrames = Math.max(1, Math.floor(v.duration * S.fps));
+    cv.width = S.vw; cv.height = S.vh;
+    $('scrub').max = S.nFrames - 1;
+    $('startCard').style.display = 'none';
+    $('workArea').style.display = '';
+    $('boxBanner').classList.remove('hide');
+    S.i = 0; S.poses = {}; S.keys = []; S.boxPx = null;
+    goFrame(0);
+  };
+  v.onerror = () => alert('This browser could not read that video file.');
+}
+function seek(t) {
+  return new Promise(res => {
+    if (!S.video) return res();
+    const done = () => { S.video.removeEventListener('seeked', done); res(); };
+    S.video.addEventListener('seeked', done);
+    S.video.currentTime = t;
+  });
+}
+async function goFrame(i) {
+  S.i = clamp(i, 0, S.nFrames - 1);
+  $('scrub').value = S.i;
+  await seek(Math.min((S.i + 0.5) / S.fps, Math.max(0, S.video.duration - 1e-3)));
+  // Start from the nearest earlier frame you already traced, so you nudge
+  // rather than place everything again.
+  if (!S.poses[S.i]) {
+    let src = null;
+    for (let k = S.i - 1; k >= 0; k--) if (S.poses[k]) { src = S.poses[k]; break; }
+    if (!src) for (let k = S.i + 1; k < S.nFrames; k++) if (S.poses[k]) { src = S.poses[k]; break; }
+    if (src) { S.poses[S.i] = {}; for (const j in src) S.poses[S.i][j] = src[j].slice(); }
+  }
+  draw();
+}
+
+// --------------------------------------------------------------------------
+// View transform on the tracing canvas
+// --------------------------------------------------------------------------
+let view = { s: 1, ox: 0, oy: 0 };
+function computeView() {
+  const z = parseFloat($('zoom').value) || 1;
+  const pose = S.poses[S.i];
+  let cx = S.vw / 2, cy = S.vh / 2;
+  if (pose) {
+    const pts = Object.values(pose);
+    if (pts.length) {
+      cx = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+      cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+    }
+  }
+  view = { s: z, ox: clamp(cx - S.vw / (2 * z), 0, S.vw - S.vw / z), oy: clamp(cy - S.vh / (2 * z), 0, S.vh - S.vh / z) };
+}
+const toScreen = p => [(p[0] - view.ox) * view.s, (p[1] - view.oy) * view.s];
+const toWorld = (x, y) => [x / view.s + view.ox, y / view.s + view.oy];
+function eventPoint(ev) {
+  const r = cv.getBoundingClientRect();
+  return toWorld((ev.clientX - r.left) * cv.width / r.width, (ev.clientY - r.top) * cv.height / r.height);
+}
+
+// --------------------------------------------------------------------------
+// Drawing the trace view
+// --------------------------------------------------------------------------
+function nextJoint() {
+  const pose = S.poses[S.i] || {};
+  return JOINTS.find(j => !pose[j.id]) || null;
+}
+function draw() {
+  if (!S.video) return;
+  computeView();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(view.s, 0, 0, view.s, -view.ox * view.s, -view.oy * view.s);
+  if ($('showVideo').checked) ctx.drawImage(S.video, 0, 0, S.vw, S.vh);
+
+  const pose = S.poses[S.i] || {};
+  const px = id => pose[id];
+
+  // pole, from the higher hand down to the box
+  if (S.boxPx && (px('lhand') || px('rhand'))) {
+    const hands = [px('lhand'), px('rhand')].filter(Boolean);
+    const top = hands.reduce((a, b) => dist(a, S.boxPx) >= dist(b, S.boxPx) ? a : b);
+    drawPole(ctx, top, S.boxPx, S.bend, 3 / view.s);
+  }
+  if (S.boxPx) {
+    ctx.strokeStyle = '#ffb020'; ctx.lineWidth = 2 / view.s;
+    const r = 11 / view.s, b = S.boxPx;
+    ctx.beginPath(); ctx.moveTo(b[0] - r, b[1]); ctx.lineTo(b[0] + r, b[1]);
+    ctx.moveTo(b[0], b[1] - r); ctx.lineTo(b[0], b[1] + r); ctx.stroke();
+  }
+
+  // the figure: one colour, plain stick figure
+  ctx.strokeStyle = FIG; ctx.fillStyle = FIG; ctx.lineCap = 'round'; ctx.lineWidth = 3 / view.s;
+  for (const [a, b] of LIMBS) {
+    if (!px(a) || !px(b)) continue;
+    ctx.beginPath(); ctx.moveTo(px(a)[0], px(a)[1]); ctx.lineTo(px(b)[0], px(b)[1]); ctx.stroke();
+  }
+  if (px('head') && px('neck')) {
+    const r = dist(px('head'), px('neck')) * 0.55;
+    ctx.beginPath(); ctx.arc(px('head')[0], px('head')[1], Math.max(r, 5 / view.s), 0, Math.PI * 2); ctx.stroke();
+  }
+  const rr = (S.coarse ? 7 : 5) / view.s;
+  for (const j of JOINTS) {
+    const p = px(j.id); if (!p) continue;
+    ctx.beginPath(); ctx.arc(p[0], p[1], S.drag === j.id ? rr * 1.7 : rr, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // labels and panels
+  const key = S.keys.find(k => k.frame === S.i);
+  $('frameLabel').innerHTML = `frame ${S.i + 1} of ${S.nFrames}` + (key ? ` &middot; <b>${key.name}</b>` : '');
+  renderJointList();
+  renderKeyList();
+  renderAngles();
+  drawStage();
+}
+
+function drawPole(c, top, tip, bend, lw) {
+  c.strokeStyle = '#ff9a2e'; c.lineWidth = lw; c.lineCap = 'round';
+  const chord = dist(top, tip);
+  const sag = bend * chord * 0.55;
+  let nx = -(top[1] - tip[1]) / (chord || 1), ny = (top[0] - tip[0]) / (chord || 1);
+  // bow toward the pit, which is the direction the athlete is travelling
+  const towardPit = S.flip ? -1 : 1;
+  if (nx * towardPit < 0) { nx = -nx; ny = -ny; }
+  const cx = (top[0] + tip[0]) / 2 + nx * sag, cy = (top[1] + tip[1]) / 2 + ny * sag;
+  c.beginPath(); c.moveTo(tip[0], tip[1]); c.quadraticCurveTo(cx, cy, top[0], top[1]); c.stroke();
+}
+
+function renderJointList() {
+  const pose = S.poses[S.i] || {};
+  const nx = nextJoint();
+  $('jointList').innerHTML = JOINTS.map(j =>
+    `<div class="jbtn ${pose[j.id] ? 'set' : ''} ${nx && nx.id === j.id ? 'next' : ''}" data-j="${j.id}">
+       <span class="dot"></span>${j.label}</div>`).join('');
+  $('jointList').querySelectorAll('.jbtn').forEach(el => {
+    el.onclick = () => { delete (S.poses[S.i] || {})[el.dataset.j]; draw(); };
+  });
+}
+
+function renderKeyList() {
+  const host = $('keyList');
+  if (!S.keys.length) { host.innerHTML = '<span class="hint">Nothing saved yet.</span>'; return; }
+  host.innerHTML = S.keys.slice().sort((a, b) => a.frame - b.frame).map(k =>
+    `<div class="keyrow ${k.frame === S.i ? 'cur' : ''}">
+       <span class="nm">${k.name}</span>
+       <span class="hint">f${k.frame + 1}</span>
+       <button data-go="${k.frame}">Go</button>
+       <button data-del="${k.frame}">&times;</button>
+     </div>`).join('');
+  host.querySelectorAll('[data-go]').forEach(b => b.onclick = () => goFrame(parseInt(b.dataset.go)));
+  host.querySelectorAll('[data-del]').forEach(b => b.onclick = () => {
+    S.keys = S.keys.filter(k => k.frame !== parseInt(b.dataset.del)); draw();
+  });
+}
+
+// --------------------------------------------------------------------------
+// Turning traced points into the animation's angles
+// --------------------------------------------------------------------------
+const angleDeg = (a, b) => Math.atan2(b[0] - a[0], -(b[1] - a[1])) * 180 / Math.PI;
+
+function scalePx() {
+  // One unit of the scene per pixel, from the torso length across saved frames.
+  const lens = [];
+  for (const k of S.keys) {
+    const p = S.poses[k.frame];
+    if (p && p.neck && p.pelvis) lens.push(dist(p.neck, p.pelvis));
+  }
+  const p = S.poses[S.i];
+  if (!lens.length && p && p.neck && p.pelvis) lens.push(dist(p.neck, p.pelvis));
+  if (!lens.length) return null;
+  lens.sort((a, b) => a - b);
+  return BONES.torso / lens[Math.floor(lens.length / 2)];
+}
+
+function poseToCanvas(pose, scale) {
+  const box = S.boxPx || [S.vw / 2, S.vh * 0.9];
+  const fx = x => S.flip ? (S.vw - x) : x;
+  const bx = fx(box[0]);
+  const out = {};
+  for (const j in pose) out[j] = [BOX_X + (fx(pose[j][0]) - bx) * scale, GROUND + (pose[j][1] - box[1]) * scale];
+  return out;
+}
+
+function poseToAngles(pose, scale) {
+  if (!pose || !pose.neck || !pose.pelvis) return null;
+  const J = poseToCanvas(pose, scale);
+  const A = {};
+  A.torso = angleDeg(J.pelvis, J.neck);
+  A.head = J.head ? angleDeg(J.neck, J.head) : A.torso;
+  const arm = (elbow, hand, side) => {
+    A[side + 'UpperArm'] = J[elbow] ? angleDeg(J.neck, J[elbow]) : 0;
+    A[side + 'Forearm'] = (J[elbow] && J[hand]) ? angleDeg(J[elbow], J[hand]) : A[side + 'UpperArm'];
+  };
+  const leg = (knee, foot, side) => {
+    A[side + 'Thigh'] = J[knee] ? angleDeg(J.pelvis, J[knee]) : 180;
+    A[side + 'Shin'] = (J[knee] && J[foot]) ? angleDeg(J[knee], J[foot]) : A[side + 'Thigh'];
+  };
+  arm('lelbow', 'lhand', 'l'); arm('relbow', 'rhand', 'r');
+  leg('lknee', 'lfoot', 'l');  leg('rknee', 'rfoot', 'r');
+  return { hip: J.pelvis, angles: A, joints: J };
+}
+
+// Keep angles continuous from one saved position to the next, so a swing that
+// passes upside down reads as a rotation instead of flipping sign.
+function unwrapKeys(list) {
+  for (let i = 1; i < list.length; i++) {
+    for (const n in list[i].angles) {
+      let d = list[i].angles[n] - list[i - 1].angles[n];
+      while (d > 180) d -= 360;
+      while (d < -180) d += 360;
+      list[i].angles[n] = list[i - 1].angles[n] + d;
+    }
+  }
+  return list;
+}
+
+function buildPositions() {
+  const scale = scalePx();
+  if (!scale) return [];
+  const out = [];
+  for (const k of S.keys.slice().sort((a, b) => a.frame - b.frame)) {
+    const r = poseToAngles(S.poses[k.frame], scale);
+    if (!r) continue;
+    const box = [BOX_X, GROUND];
+    const hands = ['lhand', 'rhand'].map(h => r.joints[h]).filter(Boolean);
+    const top = hands.length ? hands.reduce((a, b) => dist(a, box) >= dist(b, box) ? a : b) : null;
+    out.push({
+      name: k.name, frame: k.frame, t: round1(k.frame / S.fps * 100) / 100,
+      hip: [round1(r.hip[0]), round1(r.hip[1])],
+      angles: Object.fromEntries(Object.entries(r.angles).map(([n, v]) => [n, round1(v)])),
+      pole: top && S.boxPx ? { top: [round1(top[0]), round1(top[1])], tip: box,
+                               bend: Math.round(S.bend * 100) / 100,
+                               sag: round1(S.bend * dist(top, box) * 0.55),
+                               angle: round1(angleDeg(box, top)), state: 'planted' } : null,
+    });
+  }
+  return unwrapKeys(out);
+}
+
+// --------------------------------------------------------------------------
+// The result canvas: the figure the animation will show
+// --------------------------------------------------------------------------
+function segEnd(p, ang, len) { const a = ang * Math.PI / 180; return [p[0] + len * Math.sin(a), p[1] - len * Math.cos(a)]; }
+function figureFrom(pos) {
+  const A = pos.angles, hip = pos.hip;
+  const neck = segEnd(hip, A.torso, BONES.torso);
+  const head = segEnd(neck, A.head, BONES.head);
+  const bones = [[hip, neck], [neck, head]];
+  const hands = [];
+  for (const s of ['l', 'r']) {
+    const el = segEnd(neck, A[s + 'UpperArm'], BONES.upperArm);
+    const hd = segEnd(el, A[s + 'Forearm'], BONES.forearm);
+    const kn = segEnd(hip, A[s + 'Thigh'], BONES.thigh);
+    const an = segEnd(kn, A[s + 'Shin'], BONES.shin);
+    bones.push([neck, el], [el, hd], [hip, kn], [kn, an]);
+    hands.push(hd);
+  }
+  return { hip, neck, head, bones, hands };
+}
+function fitFactor(list) {
+  let top = Infinity;
+  for (const p of list) {
+    const f = figureFrom(p);
+    top = Math.min(top, f.head[1] - BONES.head, ...f.bones.map(b => b[1][1]));
+    if (p.pole) top = Math.min(top, p.pole.top[1]);
+  }
+  return top >= 12 ? 1 : (GROUND - 12) / (GROUND - top);
+}
+const tf = (p, f) => [BOX_X + (p[0] - BOX_X) * f, GROUND + (p[1] - GROUND) * f];
+
+function drawStage() {
+  const list = buildPositions();
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.fillStyle = '#faf8f5'; sctx.fillRect(0, 0, W, H);
+  sctx.strokeStyle = '#333'; sctx.lineWidth = 2;
+  sctx.beginPath(); sctx.moveTo(0, GROUND); sctx.lineTo(W, GROUND); sctx.stroke();
+  sctx.fillStyle = '#8a8a8a';
+  sctx.beginPath(); sctx.moveTo(BOX_X - 40, GROUND); sctx.lineTo(BOX_X, GROUND);
+  sctx.lineTo(BOX_X, GROUND + 12); sctx.lineTo(BOX_X - 30, GROUND + 12); sctx.closePath(); sctx.fill();
+  sctx.fillStyle = '#ebd7c0'; sctx.fillRect(610, GROUND - 40, W - 610, 40);
+  sctx.strokeStyle = '#aaa'; sctx.lineWidth = 2;
+  for (const x of [600, 640]) { sctx.beginPath(); sctx.moveTo(x, GROUND); sctx.lineTo(x, 40); sctx.stroke(); }
+  if (!list.length) {
+    sctx.fillStyle = '#999'; sctx.font = '15px system-ui, sans-serif';
+    sctx.fillText('Save a position to see it here', 24, 40);
+    return;
+  }
+  const f = fitFactor(list);
+  const pos = S.playing || list.length > 1 ? interp(list, S.t) : list[0];
+  if (pos.pole) {
+    const fig = figureFrom(pos);
+    const box = tf(pos.pole.tip, f);
+    const top = tf(fig.hands.reduce((a, b) => dist(a, [BOX_X, GROUND]) >= dist(b, [BOX_X, GROUND]) ? a : b), f);
+    sctx.strokeStyle = '#c86e1e'; sctx.lineWidth = 3; sctx.lineCap = 'round';
+    const chord = dist(top, box), sag = pos.pole.bend * chord * 0.55;
+    let nx = -(top[1] - box[1]) / (chord || 1), ny = (top[0] - box[0]) / (chord || 1);
+    if (nx < 0) { nx = -nx; ny = -ny; }
+    sctx.beginPath(); sctx.moveTo(box[0], box[1]);
+    sctx.quadraticCurveTo((top[0] + box[0]) / 2 + nx * sag, (top[1] + box[1]) / 2 + ny * sag, top[0], top[1]);
+    sctx.stroke();
+  }
+  const fig = figureFrom(pos);
+  sctx.strokeStyle = '#222'; sctx.lineWidth = 4; sctx.lineCap = 'round';
+  for (const [a, b] of fig.bones) {
+    const A = tf(a, f), B = tf(b, f);
+    sctx.beginPath(); sctx.moveTo(A[0], A[1]); sctx.lineTo(B[0], B[1]); sctx.stroke();
+  }
+  const hd = tf(fig.head, f);
+  sctx.beginPath(); sctx.arc(hd[0], hd[1], BONES.head * 0.6 * f, 0, Math.PI * 2);
+  sctx.fillStyle = '#eee'; sctx.fill(); sctx.strokeStyle = '#222'; sctx.lineWidth = 2; sctx.stroke();
+  sctx.fillStyle = '#444'; sctx.font = '14px system-ui, sans-serif';
+  sctx.fillText(pos.name || '', 14, 26);
+  $('playHint').textContent = list.length < 2
+    ? 'Save at least two positions to see the vault play.'
+    : `${list.length} positions saved.`;
+}
+
+// Smooth pass through the saved positions (Catmull-Rom style tangents).
+function interp(list, u) {
+  if (list.length === 1) return list[0];
+  const span = list.length - 1;
+  const x = clamp(u, 0, 1) * span;
+  const i = Math.min(Math.floor(x), span - 1);
+  const t = x - i;
+  const p0 = list[Math.max(i - 1, 0)], p1 = list[i], p2 = list[i + 1], p3 = list[Math.min(i + 2, span)];
+  const h = (a, b, m0, m1) => {
+    const t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * b + (t3 - t2) * m1;
+  };
+  const ch = get => h(get(p1), get(p2), (get(p2) - get(p0)) / 2, (get(p3) - get(p1)) / 2);
+  const angles = {};
+  for (const n in p1.angles) angles[n] = ch(p => p.angles[n]);
+  const out = { name: t < 0.5 ? p1.name : p2.name, hip: [ch(p => p.hip[0]), ch(p => p.hip[1])], angles };
+  if (p1.pole && p2.pole) out.pole = { tip: p1.pole.tip, top: p1.pole.top, bend: ch(p => p.pole ? p.pole.bend : 0), state: 'planted' };
+  return out;
+}
+
+function renderAngles() {
+  const scale = scalePx();
+  const r = scale ? poseToAngles(S.poses[S.i], scale) : null;
+  if (!r) { $('angleTable').innerHTML = '<tr><td>Place the neck and hips to see angles</td></tr>'; return; }
+  $('angleTable').innerHTML = Object.entries(r.angles)
+    .map(([n, v]) => `<tr><td>${n}</td><td>${Math.round(v)}&deg;</td></tr>`).join('');
+}
+
+// --------------------------------------------------------------------------
+// Input
+// --------------------------------------------------------------------------
+cv.addEventListener('pointerdown', ev => {
+  if (!S.video) return;
+  const p = eventPoint(ev);
+  if (S.picking) {
+    S.boxPx = p; S.picking = false; cv.style.cursor = 'crosshair';
+    $('boxState').textContent = 'Box set. Click "Click the box" again to adjust.';
+    draw(); return;
+  }
+  const pose = S.poses[S.i] || (S.poses[S.i] = {});
+  // While joints are still being placed, only a click right on top of a dot
+  // grabs it; otherwise the next joint would be impossible to drop next to one
+  // already there, like an elbow beside the head.
+  const placing = !!nextJoint();
+  let near = null, nd = (placing ? 6 : (S.coarse ? 26 : 14)) / view.s;
+  for (const j of JOINTS) {
+    if (!pose[j.id]) continue;
+    const d = dist(pose[j.id], p);
+    if (d < nd) { nd = d; near = j.id; }
+  }
+  if (near) { S.drag = near; cv.setPointerCapture(ev.pointerId); draw(); return; }
+  const nx = nextJoint();
+  if (nx) { pose[nx.id] = p; S.drag = nx.id; cv.setPointerCapture(ev.pointerId); draw(); }
+});
+cv.addEventListener('pointermove', ev => {
+  if (!S.drag) return;
+  ev.preventDefault();
+  S.poses[S.i][S.drag] = eventPoint(ev);
+  draw();
+});
+cv.addEventListener('pointerup', () => { S.drag = null; draw(); });
+
+$('pickVideo').onclick = () => videoInput.click();
+const videoInput = document.createElement('input');
+videoInput.type = 'file'; videoInput.accept = 'video/*'; videoInput.id = 'videoInput';
+videoInput.style.display = 'none';
+videoInput.onchange = () => videoInput.files[0] && openVideo(videoInput.files[0]);
+document.body.append(videoInput);
+const drop = $('drop');
+drop.onclick = ev => { if (ev.target !== videoInput) videoInput.click(); };
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => {
+  e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files[0]) openVideo(e.dataTransfer.files[0]);
+});
+
+$('prevF').onclick = () => goFrame(S.i - 1);
+$('nextF').onclick = () => goFrame(S.i + 1);
+$('scrub').oninput = e => goFrame(parseInt(e.target.value));
+$('zoom').onchange = draw;
+$('showVideo').onchange = draw;
+$('flip').onchange = e => { S.flip = e.target.checked; draw(); };
+$('fps').onchange = e => {
+  S.fps = parseInt(e.target.value) || 30;
+  S.nFrames = Math.max(1, Math.floor(S.video.duration * S.fps));
+  $('scrub').max = S.nFrames - 1; goFrame(Math.min(S.i, S.nFrames - 1));
+};
+$('clearFrame').onclick = () => { delete S.poses[S.i]; S.keys = S.keys.filter(k => k.frame !== S.i); draw(); };
+$('bend').oninput = e => { S.bend = parseInt(e.target.value) / 100; $('bendVal').textContent = e.target.value + '%'; draw(); };
+$('setBox').onclick = () => { S.picking = true; $('zoom').value = '1'; $('boxState').textContent = 'Click the box in the video.'; draw(); };
+$('skipBox').onclick = () => $('boxBanner').classList.add('hide');
+
+$('keyName').innerHTML = KEY_NAMES.map(n => `<option>${n}</option>`).join('');
+$('markKey').onclick = () => {
+  const pose = S.poses[S.i];
+  if (!pose || !pose.neck || !pose.pelvis) { alert('Place at least the neck and the hips on this frame first.'); return; }
+  const name = $('keyName').value;
+  S.keys = S.keys.filter(k => k.frame !== S.i && k.name !== name);
+  S.keys.push({ frame: S.i, name });
+  const at = KEY_NAMES.indexOf(name);
+  if (at >= 0 && at < KEY_NAMES.length - 1) $('keyName').value = KEY_NAMES[at + 1];
+  draw();
+};
+
+window.addEventListener('keydown', ev => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(ev.target.tagName)) return;
+  if (ev.key === 'ArrowRight') { ev.preventDefault(); goFrame(S.i + 1); }
+  if (ev.key === 'ArrowLeft') { ev.preventDefault(); goFrame(S.i - 1); }
+  if (ev.key === 'Backspace') {
+    ev.preventDefault();
+    const pose = S.poses[S.i] || {};
+    for (let i = JOINTS.length - 1; i >= 0; i--) if (pose[JOINTS[i].id]) { delete pose[JOINTS[i].id]; break; }
+    draw();
+  }
+  if (ev.key === ' ') { ev.preventDefault(); $('play').click(); }
+});
+
+// --------------------------------------------------------------------------
+// Playback
+// --------------------------------------------------------------------------
+let last = null;
+$('play').onclick = () => {
+  S.playing = !S.playing;
+  $('play').textContent = S.playing ? 'Pause' : 'Play';
+  last = null;
+  if (S.playing) requestAnimationFrame(tick);
+};
+$('playScrub').oninput = e => { S.t = e.target.value / 1000; drawStage(); };
+function tick(now) {
+  if (!S.playing) return;
+  if (last !== null) {
+    S.t += (now - last) / 1000 * parseFloat($('speed').value) / 2.2;
+    if (S.t > 1) S.t = 0;
+    $('playScrub').value = Math.round(S.t * 1000);
+  }
+  last = now; drawStage(); requestAnimationFrame(tick);
+}
+
+// --------------------------------------------------------------------------
+// Saving
+// --------------------------------------------------------------------------
+function download(obj, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(obj, null, 1)], { type: 'application/json' }));
+  a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+$('exportKeys').onclick = () => {
+  const positions = buildPositions();
+  if (!positions.length) { alert('Save at least one position first.'); return; }
+  download({
+    name: S.name || 'vault', bones: BONES,
+    canvas: { width: W, height: H, groundY: GROUND, boxX: BOX_X, barY: 120 },
+    angleConvention: 'degrees, 0 = straight up, 90 = forward toward the pit, 180 = down; continuous across positions',
+    poleStyle: { bendToward: 'pit', bendScale: 1 },
+    positions,
+  }, (S.name || 'vault') + '_positions.json');
+};
+$('saveProj').onclick = () => {
+  if (!S.video) { alert('Open a video first.'); return; }
+  download({ kind: 'pole-vault-tracer', name: S.name, fps: S.fps, nFrames: S.nFrames,
+             videoSize: [S.vw, S.vh], boxPx: S.boxPx, bend: S.bend, flip: S.flip,
+             poses: S.poses, keys: S.keys }, (S.name || 'vault') + '_work.json');
+};
+const projInput = document.createElement('input');
+projInput.type = 'file'; projInput.accept = 'application/json'; projInput.id = 'projInput';
+projInput.style.display = 'none';
+document.body.append(projInput);
+projInput.onchange = () => {
+  const f = projInput.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (d.kind !== 'pole-vault-tracer') throw new Error('not a saved tracer file');
+      S.poses = d.poses || {}; S.keys = d.keys || []; S.boxPx = d.boxPx || null;
+      S.bend = d.bend ?? 0.22; S.flip = !!d.flip;
+      $('bend').value = Math.round(S.bend * 100); $('bendVal').textContent = Math.round(S.bend * 100) + '%';
+      $('flip').checked = S.flip;
+      if (d.fps) { S.fps = d.fps; $('fps').value = d.fps; }
+      if (!S.video) alert('Work loaded. Open the same video to see it on the frames.');
+      else goFrame(S.keys.length ? S.keys[0].frame : 0);
+      draw();
+    } catch (e) { alert('Could not read that file: ' + e.message); }
+  };
+  r.readAsText(f);
+};
+$('loadProj').onclick = () => projInput.click();
+</script>
+</body>
+</html>
