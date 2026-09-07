@@ -157,6 +157,12 @@
     <p class="hint">Joints are stored in canvas units. Dragging updates the angles from the joint positions; the fixed-bone figure is rebuilt from the hip and the angles, so it will not sit exactly on the dragged joints when limbs are foreshortened.</p>
   </div>
 </main>
+<script type="module">
+// Detection in the page itself, so a phone needs nothing installed.
+import { processVideoInBrowser } from './pose-pipeline.js';
+window.processVideoInBrowser = processVideoInBrowser;
+window.dispatchEvent(new Event('pipeline-ready'));
+</script>
 <script>
 const GROUND = 340, BOX_X = 560;
 const CONN = [['l_shoulder','l_elbow'],['l_elbow','l_wrist'],['r_shoulder','r_elbow'],['r_elbow','r_wrist'],
@@ -554,7 +560,7 @@ document.getElementById('guideLooksRight').onclick = () => {
 // without that server the upload panel disables itself and the file pickers in
 // the header remain the way in.
 // ---------------------------------------------------------------------------
-let hasServer = false;
+let hasServer = false, serverCanProcess = false;
 // When the app is served to other devices it requires a key, carried in the
 // page URL. Everything the page fetches has to pass it along.
 const KEY = new URLSearchParams(location.search).get('k') || '';
@@ -570,7 +576,7 @@ function setProgress(pct, text, isError) {
 }
 function uploadVideo(file) {
   if (!file) return;
-  if (!hasServer) { alert('Video processing needs the app running on a computer. Start it there with:\n\npython tools/vault_app.py --lan\n\nthen open the link it prints.'); return; }
+  if (!hasServer || !serverCanProcess) return processHere(file);
   document.getElementById('drop').style.display = 'none';
   setProgress(2, 'Uploading ' + file.name + '…');
   fetch(keyed('/api/upload?filename=' + encodeURIComponent(file.name)), { method: 'POST', body: file })
@@ -581,6 +587,34 @@ function uploadVideo(file) {
     })
     .catch(e => { setProgress(100, 'Upload failed: ' + e.message, true); document.getElementById('drop').style.display = ''; });
 }
+// No server: run detection in this page. Results live in memory, so the
+// Save buttons are how you keep them.
+function processHere(file) {
+  if (!window.processVideoInBrowser) {
+    setProgress(100, 'The in-page detector could not load. Check that pose-pipeline.js sits next to this file and that the page is opened over http, not from the file system.', true);
+    return;
+  }
+  document.getElementById('drop').style.display = 'none';
+  setProgress(1, 'Starting…');
+  window.processVideoInBrowser(file, { quality: S.coarse ? 'lite' : 'full' }, p => {
+    setProgress(p.pct, p.stage + (p.message ? ' — ' + p.message : ''));
+  }).then(({ vault, images }) => {
+    loadData(vault);
+    S.images = images; S.imgCache = {};
+    draw();
+    document.getElementById('drop').style.display = '';
+    document.getElementById('prog').style.display = 'none';
+    document.getElementById('boxPrompt').classList.add('show');
+    document.getElementById('boxState').textContent = 'Estimated from the hands, worth correcting.';
+    const sel = document.getElementById('vaultPick');
+    if (![...sel.options].some(o => o.value === vault.name)) sel.add(new Option(vault.name, vault.name), 1);
+    sel.value = vault.name;
+  }).catch(e => {
+    setProgress(100, 'Could not process that clip: ' + e.message, true);
+    document.getElementById('drop').style.display = '';
+  });
+}
+
 function pollJob(id) {
   fetch(keyed('/api/job?id=' + id)).then(r => r.json()).then(j => {
     if (j.error) {
@@ -613,14 +647,16 @@ function openVault(name) {
 function refreshVaults() {
   return fetch(keyed('/api/vaults')).then(r => r.json()).then(v => {
     hasServer = true;
+    serverCanProcess = !!v.canProcess;
+    document.getElementById('offlineNote').textContent = serverCanProcess
+      ? '' : 'Clips are processed in this page and kept in memory. Use Save vault JSON to keep one.';
     const sel = document.getElementById('vaultPick');
     const cur = sel.value;
     sel.innerHTML = '<option value="">(choose a clip)</option>' + v.vaults.map(n => `<option>${n}</option>`).join('');
     sel.value = cur;
   }).catch(() => {
     hasServer = false;
-    document.getElementById('drop').style.opacity = .5;
-    document.getElementById('offlineNote').textContent = 'Start tools/vault_app.py to process a video here.';
+    document.getElementById('offlineNote').textContent = 'Clips are processed in this page and kept in memory. Use Save vault JSON to keep one.';
   });
 }
 const drop = document.getElementById('drop');

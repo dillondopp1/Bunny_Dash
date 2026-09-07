@@ -13,18 +13,12 @@ if "%PY%"=="" (
   exit /b 1
 )
 
+REM Nothing needs installing: the page can do the pose detection itself.
 %PY% -c "import mediapipe, cv2, scipy" >nul 2>&1
 if errorlevel 1 (
-  echo Setting up for the first time. This takes a few minutes and only happens once.
-  %PY% -m pip install --quiet --upgrade pip
-  %PY% -m pip install --quiet -r requirements.txt
-  if errorlevel 1 (
-    echo.
-    echo Setup failed. The message above says why.
-    pause
-    exit /b 1
-  )
-  echo Setup done.
+  echo Clips will be processed in the browser. Nothing to install.
+) else (
+  echo Pose packages found, clips will be processed here and saved to data\.
 )
 
 echo.

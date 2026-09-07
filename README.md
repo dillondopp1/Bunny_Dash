@@ -3,6 +3,21 @@
 Tools for turning a side-on pole vault clip into a stick figure animation and
 a JSON of per-frame joint angles that plays in `pole-vault-positions.html`.
 
+## How the detection can run
+
+Two interchangeable engines produce the same vault JSON:
+
+- **In the browser.** `pose-pipeline.js` runs MediaPipe as WebAssembly inside
+  the page. Nothing to install, works on a phone, and the runtime and models
+  are vendored under `vendor/` so it also works with no internet. Results live
+  in memory until you press Save.
+- **In Python.** `tools/extract_pose.py` and `tools/process_pose.py`, driven by
+  `tools/vault_app.py`. Needs `pip install -r requirements.txt`, is faster on a
+  laptop, and writes results into `data/` so they persist.
+
+The page uses Python when the app reports the packages are installed, and the
+browser otherwise, so neither is required.
+
 ## Getting it onto your computer
 
 1. Download the code. On the repository page on GitHub, switch to the branch
@@ -11,10 +26,9 @@ a JSON of per-frame joint angles that plays in `pole-vault-positions.html`.
    Desktop.
 2. Open the unzipped folder and double-click **start-here-mac.command** on a
    Mac, or **start-here-windows.bat** on Windows.
-3. The first run installs what it needs, which takes a few minutes and only
-   happens once. After that it asks whether you want the editor on this
-   computer only, or on your phone as well, then opens the page in your
-   browser.
+3. It asks whether you want the editor on this computer only, or on your phone
+   as well, then opens the page in your browser. There is nothing to install:
+   if the Python packages are absent, clips are processed in the page itself.
 
 If Python is missing, the launcher says so and points you at
 [python.org/downloads](https://www.python.org/downloads/). On Windows, tick

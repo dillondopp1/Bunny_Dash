@@ -37,6 +37,21 @@ MAX_UPLOAD = 600 * 1024 * 1024
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+
+def can_process():
+    """True when the Python pipeline can run here. Without it the page falls
+    back to detecting in the browser, which needs nothing installed."""
+    # find_spec locates the packages without importing them, which keeps
+    # startup instant; importing mediapipe takes seconds.
+    try:
+        import importlib.util as u
+        return all(u.find_spec(m) is not None for m in ("mediapipe", "cv2", "scipy"))
+    except Exception:
+        return False
+
+
+CAN_PROCESS = False
 # Set when serving beyond this machine; then /api/ and /data/ need ?k=TOKEN.
 TOKEN = ""
 
@@ -181,7 +196,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         full = os.path.join(DATA, f)
                         found.append((os.path.getmtime(full), f[:-5]))
             found.sort(reverse=True)          # newest first
-            return self._json({"vaults": [n for _, n in found]})
+            return self._json({"vaults": [n for _, n in found], "canProcess": CAN_PROCESS})
         if parts.path == "/":
             self.send_response(302)
             self.send_header("Location", "/pose-editor.html" + (f"?k={TOKEN}" if TOKEN else ""))
@@ -196,6 +211,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._json({"error": "bad or missing key"}, 403)
         if parts.path != "/api/upload":
             return self._json({"error": "unknown endpoint"}, 404)
+        if not CAN_PROCESS:
+            return self._json({"error": "this copy has no pose packages installed"}, 503)
         q = urllib.parse.parse_qs(parts.query)
         filename = q.get("filename", ["clip.mp4"])[0]
         bar_px = q.get("bar", [""])[0]
@@ -241,7 +258,7 @@ def main():
                     help="also serve to phones and tablets on the same wifi")
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
-    global TOKEN
+    global TOKEN, CAN_PROCESS
     host = args.host or ("0.0.0.0" if args.lan else "127.0.0.1")
     open_to_network = args.lan or host not in ("127.0.0.1", "localhost")
     if open_to_network:
@@ -250,8 +267,11 @@ def main():
         os.makedirs(d, exist_ok=True)
     suffix = f"?k={TOKEN}" if TOKEN else ""
     url = f"http://127.0.0.1:{args.port}/pose-editor.html{suffix}"
+    CAN_PROCESS = can_process()
     srv = Server((host, args.port), Handler)
     print(f"Pole vault editor running at {url}")
+    if not CAN_PROCESS:
+        print("(clips will be processed in the browser; nothing to install)")
     if open_to_network:
         print()
         print("On your phone, on the same wifi, open:")

@@ -16,16 +16,12 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-if ! "$PY" -c 'import mediapipe, cv2, scipy' >/dev/null 2>&1; then
-  echo "Setting up for the first time. This takes a few minutes and only happens once."
-  "$PY" -m pip install --quiet --upgrade pip
-  if ! "$PY" -m pip install --quiet -r requirements.txt; then
-    echo
-    echo "Setup failed. The message above says why."
-    read -r -p "Press return to close. " _
-    exit 1
-  fi
-  echo "Setup done."
+# Nothing needs installing: the page can do the pose detection itself. Only
+# offer the Python pipeline if it happens to be available already.
+if "$PY" -c 'import mediapipe, cv2, scipy' >/dev/null 2>&1; then
+  echo "Pose packages found, clips will be processed here and saved to data/."
+else
+  echo "Clips will be processed in the browser. Nothing to install."
 fi
 
 echo
