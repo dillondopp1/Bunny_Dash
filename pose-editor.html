@@ -125,11 +125,20 @@
     <div class="row">
       <label>Zoom <select id="zoom"><option value="1">1x</option><option value="2" selected>2x</option><option value="3">3x</option><option value="4">4x</option></select></label>
       <label><input type="checkbox" id="showVideo" checked> Video</label>
-      <label><input type="checkbox" id="showFk" checked> Fixed-bone figure</label>
+      <label><input type="checkbox" id="showFk"> Stick figure overlay</label>
       <label><input type="checkbox" id="showPole" checked> Pole</label>
       <button id="reset">Reset frame</button>
       <button id="copyPrev">Copy previous frame</button>
       <span class="hint">Drag a joint. Arrows step frames, 1 to 9 jump to key positions.</span>
+    </div>
+    <div class="row">
+      <span class="hint">
+        <b style="color:#d02020">&#9644;</b> tracked body, drag any dot to fix it &nbsp;
+        <b style="color:#1a9a1a">&#9679;</b> left side &nbsp;
+        <b style="color:#c020a0">&#9679;</b> right side &nbsp;
+        <b style="color:#d07a10">&#9644;</b> pole &nbsp;
+        <b style="color:#ffb020">&#10010;</b> plant box
+      </span>
     </div>
     <div class="row">
       <button id="guideStart" class="primary">Start guided fixing</button>
@@ -290,11 +299,13 @@ function draw() {
   const r = 10 / view.s;
   ctx.beginPath(); ctx.moveTo(bpx[0] - r, bpx[1]); ctx.lineTo(bpx[0] + r, bpx[1]);
   ctx.moveTo(bpx[0], bpx[1] - r); ctx.lineTo(bpx[0], bpx[1] + r); ctx.stroke();
-  // measured joints
-  ctx.lineWidth = lw; ctx.strokeStyle = '#ff3b3b';
+  // The tracked body: one skeleton, drawn in one colour. The hip-to-shoulder
+  // line is part of it (there is no landmark for the spine, it is the midpoint
+  // of the hips joined to the midpoint of the shoulders).
+  ctx.lineWidth = lw * 1.5; ctx.strokeStyle = '#ff3b3b'; ctx.lineCap = 'round';
   for (const [a, b] of CONN) { const A = toPx(fr.joints[a]), B = toPx(fr.joints[b]); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke(); }
   const hipPx = toPx(mid(fr.joints.l_hip, fr.joints.r_hip)), shoPx = toPx(mid(fr.joints.l_shoulder, fr.joints.r_shoulder));
-  ctx.strokeStyle = '#ffd23b'; ctx.beginPath(); ctx.moveTo(hipPx[0], hipPx[1]); ctx.lineTo(shoPx[0], shoPx[1]); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hipPx[0], hipPx[1]); ctx.lineTo(shoPx[0], shoPx[1]); ctx.stroke();
   for (const n in fr.joints) {
     const p = toPx(fr.joints[n]);
     ctx.fillStyle = n.startsWith('l_') ? '#3bff7a' : n.startsWith('r_') ? '#ff3bd6' : '#ffffff';
@@ -641,7 +652,9 @@ function openVault(name) {
     S.images = {}; S.imgCache = {};
     d.frames.forEach(f => S.images[f.frame] = keyed(dir + 'f_' + String(f.frame).padStart(4, '0') + '.jpg'));
     draw();
-    document.getElementById('vaultPick').value = name;
+    const sel = document.getElementById('vaultPick');
+    if (![...sel.options].some(o => o.value === name)) sel.add(new Option(name, name), 1);
+    sel.value = name;
   });
 }
 function refreshVaults() {
@@ -730,7 +743,9 @@ refreshVaults().then(() => {
   const sel = document.getElementById('vaultPick');
   const names = [...sel.options].map(o => o.value).filter(Boolean);
   const pick = want && names.includes(want) ? want : names[0];
-  if (pick) openVault(pick);
+  if (pick) return openVault(pick);
+  // No app server: fall back to any sample clip sitting next to this page.
+  return openVault(want || 'vault_2018-05-24').catch(() => {});
 });
 </script>
 </body>
