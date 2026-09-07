@@ -42,11 +42,56 @@ Everything runs on your own machine; nothing is uploaded anywhere.
 Processed clips are listed in the dropdown at the top of the page, so you can
 come back to one later. Add `?vault=name` to the URL to open a specific one.
 
-## Using it from a phone or tablet
+## Running it on an Android phone, with no computer
 
-Pose detection needs Python and mediapipe, so it runs on a computer, not on
-the phone. The page itself is plain HTML and works fine on a phone, so run the
-app on a laptop and open it from the phone over the same wifi:
+Everything, detection included, can run on the phone itself. It needs a real
+Linux environment, because the mediapipe, opencv, numpy and scipy builds are
+glibc builds and Termux on its own is not glibc. Termux can host one.
+
+Install **Termux from F-Droid** (https://f-droid.org/packages/com.termux/), not
+from the Play Store; the Play Store build is old and will not do this. Then in
+Termux:
+
+```
+pkg update -y && pkg install -y proot-distro
+proot-distro install ubuntu
+proot-distro login ubuntu
+```
+
+You are now in Linux on the phone. Fetch the project and set it up:
+
+```
+apt update && apt install -y curl unzip
+curl -L -o vault.zip https://github.com/dillondopp1/Bunny_Dash/archive/refs/heads/claude/pole-vault-video-poses-9w1939.zip
+unzip -q vault.zip && cd Bunny_Dash-claude-pole-vault-video-poses-9w1939
+bash tools/setup-android.sh
+```
+
+The setup step downloads about 200 MB and takes a while. It installs into a
+`.venv` folder inside the project, because recent Ubuntu refuses to install
+packages into its system Python. When it finishes, start the editor:
+
+```
+bash tools/run-android.sh
+```
+
+Leave Termux open and switch to Chrome on the same phone:
+
+```
+http://127.0.0.1:8765/pose-editor.html
+```
+
+Drop in a clip from your camera roll and it processes on the phone. Expect a
+few minutes for a short clip: proot adds overhead and a phone is slower than a
+laptop, so trim clips to just the vault. To use it again later, open Termux and
+run `proot-distro login ubuntu`, then `cd Bunny_Dash-*` and
+`bash tools/run-android.sh`.
+
+## Using it from a phone, with a computer doing the work
+
+If you do have a laptop, this route is faster and much less fiddly than the
+Termux one above. The laptop does the detection and the phone just shows the
+editor, over the same wifi:
 
 ```
 python tools/vault_app.py --lan
@@ -65,10 +110,7 @@ only listens on the computer itself and needs no key.
 
 On the phone the layout stacks into one column, joints get a larger touch
 target, and dragging does not scroll the page. Zoom to 3x or 4x for fiddly
-frames. Running the detection on the phone itself is not supported: there are
-64-bit ARM Linux builds of mediapipe, so a full Linux environment on Android
-(Termux with proot-distro, not plain Termux, which is not glibc) could run it,
-but it is slow and awkward and the wifi route is better.
+frames.
 
 The one thing the app cannot work out for itself is the plant box: no pose
 model detects a pole, so it estimates the box from the line through both hands

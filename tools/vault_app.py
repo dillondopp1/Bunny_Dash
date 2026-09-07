@@ -261,7 +261,12 @@ def main():
         print("so treat the link as private. Restarting issues a new key.")
     print("Drop a video on the page to start. Ctrl+C here to stop.")
     if not args.no_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        def open_browser():
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass          # no desktop to open one on, e.g. Termux; the URL is printed above
+        threading.Timer(0.6, open_browser).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
